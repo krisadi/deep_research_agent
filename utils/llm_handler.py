@@ -63,18 +63,57 @@ def get_llm_response(prompt_text, system_prompt="You are a helpful research assi
         return "Error: Azure OpenAI deployment name (AZURE_OPENAI_DEPLOYMENT_NAME) is not set."
 
     print(f"Sending prompt to Azure OpenAI deployment: {azure_deployment_name}")
-    # print(f"System Prompt: {system_prompt}")
-    # print(f"User Prompt (first 200 chars): {prompt_text[:200]}...")
+
+    # Default parameters
+    model_params = {
+        "temperature": 0.7,
+        "max_tokens": 1500
+    }
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt_text}
+    ]
+
+    # Check if deployment name suggests o3-mini model for specific settings
+    if azure_deployment_name and "o3-mini" in azure_deployment_name.lower():
+        print(f"Applying o3-mini specific settings for deployment: {azure_deployment_name}")
+        # Override/set specific parameters for o3-mini with high reasoning effort
+        # Remove temperature if not applicable, or set to a value appropriate for high reasoning
+        model_params = { 
+            "reasoning_effort": "high",
+            "max_completion_tokens": 5000 
+            # Add temperature here if 'o3-mini' also expects it, e.g., temperature: 0.3
+        }
+        # Change system message role to "developer"
+        messages = [
+            {"role": "developer", "content": system_prompt}, # System prompt content is still used
+            {"role": "user", "content": prompt_text}
+        ]
+        # If 'temperature' is not part of o3-mini's specific parameters, 
+        # ensure it's not passed by removing it from model_params or not adding it.
+        # The example snippet did not include temperature with reasoning_effort.
+        # If 'temperature' is still desired, it should be added to model_params above.
+        # For now, assuming temperature is not used when reasoning_effort is present.
+        if "temperature" in model_params and "reasoning_effort" in model_params:
+            # Decide if temperature should be removed or if it's compatible
+            # For now, let's assume it might not be needed with reasoning_effort
+            # model_params.pop("temperature", None) 
+            # Based on snippet, temperature is not used with reasoning_effort, so we won't explicitly set it.
+            # The create call will use the defaults of the model if not specified.
+            # However, to be safe, let's ensure no conflicting params are sent if not specified in the snippet.
+            # The snippet used `max_completion_tokens` not `max_tokens`.
+            # The snippet did not include `temperature`.
+            pass # model_params is already set correctly for o3-mini case
+
+    else:
+        print(f"Using default LLM settings for deployment: {azure_deployment_name}")
+
 
     try:
         response = _azure_openai_client.chat.completions.create(
-            model=azure_deployment_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt_text}
-            ],
-            temperature=0.7, # Adjust as needed
-            max_tokens=1500  # Adjust as needed
+            model=azure_deployment_name, # This is the deployment name
+            messages=messages,
+            **model_params # Unpack the dictionary of parameters
         )
         content = response.choices[0].message.content
         return content.strip() if content else "LLM returned an empty response."

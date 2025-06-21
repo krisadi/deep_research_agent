@@ -16,7 +16,7 @@ faiss-cpu
 # Streamlit Extras (Optional - for copy button)
 streamlit-extras
 
-# Environment variable management (optional, if using .env files)
-# python-dotenv 
+# Environment variable management
+python-dotenv 
 
 # pdfplumber # Retaining as a comment from previous version, not actively used.

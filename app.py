@@ -1,23 +1,49 @@
 import streamlit as st
+from dotenv import load_dotenv # For loading .env file
 from utils import research_agent # research_agent will import its dependencies
 from utils.research_agent import SOURCE_PDF, SOURCE_PUBMED, SOURCE_DUCKDUCKGO # Import constants
 from typing import Set
+import os # For environment variable checks
 
-# Attempt to import copy_to_clipboard from streamlit_extras
+# Load environment variables from .env file at the very beginning
+load_dotenv()
+
+# --- Default Credentials (INSECURE - FOR DEMO/LOCAL USE ONLY) ---
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "password" # Replace with something slightly less obvious if you must
+
+# Attempt to import from streamlit_extras - currently not used actively for copy button
 try:
-    from streamlit_extras.streaming_write import write as streaming_write
-    from streamlit_extras.echo_expander import echo_expander
-    # For copy button, streamlit_extras has stx.copy_button but let's try a more direct one if available or build simply
-    # For now, we'll use a basic JS approach if streamlit_extras doesn't have an easy copy button.
-    # A common one is `st_copy_to_clipboard` but it was in a different extras package.
-    # Let's try a placeholder for copy button logic first.
-    streamlit_extras_available = True
+    # from streamlit_extras.streaming_write import write as streaming_write # Example import
+    # from streamlit_extras.echo_expander import echo_expander # Example import
+    streamlit_extras_available = True 
 except ImportError:
     streamlit_extras_available = False
-    st.warning("`streamlit-extras` not fully available. Some UI features like 'Copy to Clipboard' might be basic or unavailable. Install with `pip install streamlit-extras`")
+    # This warning can be shown once, maybe not on every run if login is implemented.
+    # st.warning("`streamlit-extras` not fully available. Some UI features might be basic or unavailable.")
 
-def main():
-    st.set_page_config(layout="wide", page_title="Deep Q&A Research Agent")
+def show_login_form():
+    """Displays the login form and handles login logic."""
+    st.subheader("Login Required")
+    with st.form("login_form"):
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        submitted = st.form_submit_button("Login")
+
+        if submitted:
+            if username == DEFAULT_USERNAME and password == DEFAULT_PASSWORD:
+                st.session_state.logged_in = True
+                st.session_state.login_error = "" # Clear any previous error
+                st.experimental_rerun() # Rerun to show main app
+            else:
+                st.session_state.login_error = "Invalid username or password."
+    
+    if "login_error" in st.session_state and st.session_state.login_error:
+        st.error(st.session_state.login_error)
+
+
+def display_main_app():
+    """Displays the main research agent application UI."""
     st.title("📚 Deep Q&A Research Agent")
     st.markdown("""
     Ask your research question, select your data sources, and let the agent synthesize information for you.
@@ -25,24 +51,30 @@ def main():
     It leverages Azure OpenAI for analysis and synthesis.
     """)
 
-    # Initialize session state variables
+    # Initialize session state variables for the main app (if not already set by login)
     if 'processing' not in st.session_state:
         st.session_state.processing = False
     if 'results' not in st.session_state:
         st.session_state.results = ""
     if 'progress_messages' not in st.session_state:
         st.session_state.progress_messages = []
-    if 'pdf_indexed_this_session' not in st.session_state:
-        st.session_state.pdf_indexed_this_session = False # To track if indexing has happened
+    # pdf_indexed_this_session is not used in this version, vector store is per-run
 
     # --- Sidebar Controls ---
     st.sidebar.header("⚙️ Query Configuration")
+    
+    if st.sidebar.button("Logout", key="logout_button"):
+        st.session_state.logged_in = False
+        st.session_state.login_error = "" # Clear login error on logout
+        # Clear other session data if needed upon logout
+        st.session_state.results = ""
+        st.session_state.progress_messages = []
+        st.experimental_rerun()
+
     query = st.sidebar.text_input("Enter your research question:", 
                                   help="Your main research question. This will be used for all selected data sources.")
     
     available_sources = [SOURCE_PUBMED, SOURCE_DUCKDUCKGO, SOURCE_PDF]
-    # Ensure PubMed is pre-selected and handled as "mandatory" if needed.
-    # For this iteration, we make it pre-selected. User can deselect if they wish.
     default_sources = [SOURCE_PUBMED, SOURCE_DUCKDUCKGO] 
 
     selected_sources: Set[str] = set(st.sidebar.multiselect(
@@ -52,47 +84,52 @@ def main():
         help="Choose the information sources to query. 'Indexed PDFs' requires you to upload PDFs."
     ))
 
-    # PDF Upload - only show if PDF source is potentially selectable or selected
     uploaded_files = None
-    if SOURCE_PDF in available_sources: # Always show uploader if it's an option
+    if SOURCE_PDF in available_sources: 
         uploaded_files = st.sidebar.file_uploader(
             "Upload PDF files (for 'Indexed PDFs' source):", 
             accept_multiple_files=True, 
             type="pdf",
-            help="Upload PDF documents if you've selected 'Indexed PDFs' as a source. These will be OCRed and indexed for semantic search."
+            help="Upload PDF documents if you've selected 'Indexed PDFs' as a source. These will be processed for semantic search."
         )
         if uploaded_files and SOURCE_PDF in selected_sources:
-            st.sidebar.info(f"{len(uploaded_files)} PDF(s) ready for indexing/searching if 'Indexed PDFs' is run.")
+            st.sidebar.info(f"{len(uploaded_files)} PDF(s) ready for processing if 'Indexed PDFs' is run.")
         elif not uploaded_files and SOURCE_PDF in selected_sources:
             st.sidebar.warning("Please upload PDF files if you intend to use the 'Indexed PDFs' source.")
 
-
-    # Source-specific controls
     if SOURCE_PUBMED in selected_sources:
         st.sidebar.subheader(f"{SOURCE_PUBMED} Options")
         max_pubmed_articles = st.sidebar.slider("Max PubMed Articles:", 
                                                 min_value=1, max_value=10, value=3,
                                                 help="Number of relevant PubMed article abstracts to fetch.")
     else:
-        max_pubmed_articles = 0 # Default if not selected
-
-    # DuckDuckGo results are fixed by a constant in research_agent for now.
-    # Could add a slider for MAX_DUCKDUCKGO_RESULTS if desired.
+        max_pubmed_articles = 0
 
     start_button = st.sidebar.button("🚀 Start Research", disabled=st.session_state.processing, type="primary")
     st.sidebar.markdown("---")
 
+    # Proactive warnings for essential configurations
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    ncbi_email = os.getenv("NCBI_EMAIL")
+
+    if not azure_endpoint:
+        st.sidebar.warning("⚠️ AZURE_OPENAI_ENDPOINT is not set. LLM features will be unavailable.")
+    
+    if not ncbi_email or ncbi_email == "your_email@example.com":
+        st.sidebar.warning("⚠️ NCBI_EMAIL is not set or uses a placeholder. PubMed searches may be less reliable.")
+
+    st.sidebar.caption("Ensure Azure OpenAI and NCBI_EMAIL environment variables are correctly set as per the README.")
 
     # --- Main Page Layout ---
-    log_col, results_col = st.columns([1, 2]) # Log on left, results on right
+    log_col, results_col = st.columns([1, 2]) 
 
     with log_col:
         st.subheader("📝 Research Process Log")
-        progress_placeholder = st.empty() # For dynamic updates of the log list
+        progress_placeholder = st.empty() 
 
     with results_col:
         st.subheader("💡 Synthesized Answer & Findings")
-        results_display_area = st.empty() # For displaying the final report
+        results_display_area = st.empty() 
 
     # --- Research Logic Trigger ---
     if start_button:
@@ -101,22 +138,16 @@ def main():
         elif not selected_sources:
             st.sidebar.error("⚠️ Please select at least one data source.")
         elif SOURCE_PDF in selected_sources and not uploaded_files:
-            st.sidebar.error(f"⚠️ '{SOURCE_PDF}' is selected, but no PDF files were uploaded. Please upload PDFs or deselect this source.")
+            st.sidebar.error(f"⚠️ '{SOURCE_PDF}' is selected, but no PDF files were uploaded.")
         else:
             st.session_state.processing = True
-            st.session_state.results = "" # Clear previous results
-            st.session_state.progress_messages = [] # Clear previous log
+            st.session_state.results = "" 
+            st.session_state.progress_messages = [] 
             
-            # This flag might be more complex if we want to preserve index across non-PDF related runs
-            st.session_state.pdf_indexed_this_session = (SOURCE_PDF in selected_sources and uploaded_files is not None)
-
             def streamlit_progress_update(message: str):
                 st.session_state.progress_messages.append(message)
-                # Update the placeholder with new messages (basic approach)
-                # A more robust live log might use st.container() and add st.text to it.
-                # For now, we'll update the full list.
 
-            with st.spinner("🧠 Performing research... This may involve fetching data, OCR, indexing, and LLM synthesis. Please wait."):
+            with st.spinner("🧠 Performing research... Please wait."):
                 try:
                     report = research_agent.conduct_research(
                         query=query,
@@ -129,61 +160,38 @@ def main():
                 except Exception as e:
                     st.session_state.results = f"An unexpected critical error occurred: {str(e)}"
                     st.session_state.progress_messages.append(f"CRITICAL ERROR: {str(e)}")
-                    st.error(f"Critical error during research: {str(e)}") # Show prominent error
+                    st.error(f"Critical error during research: {str(e)}") 
                 finally:
                     st.session_state.processing = False
-                    st.experimental_rerun() # Rerun to update UI state cleanly after processing
+                    st.experimental_rerun() 
 
-    # --- Displaying Progress and Results (after rerun or on initial load if state exists) ---
+    # --- Displaying Progress and Results ---
     if st.session_state.progress_messages:
-        # Display collected progress messages
         progress_placeholder.text_area("Log:", "".join([f"- {msg}\n" for msg in st.session_state.progress_messages]), height=400, disabled=True)
     else:
         progress_placeholder.info("Research log will appear here once processing starts.")
 
     if st.session_state.results:
         results_display_area.markdown(st.session_state.results, unsafe_allow_html=True)
-        
-        # Copy to Clipboard Button
-        # Simplistic JS hack if streamlit_extras.st_copy_to_clipboard isn't available or suitable
-        # This is a common workaround. `streamlit-extras` might have a better component.
-        # For now, let's assume a placeholder or a simple JS solution.
-        # If `streamlit_extras.st_copy_to_clipboard` was usable:
-        # from streamlit_extras.st_copy_to_clipboard import st_copy_to_clipboard
-        # st_copy_to_clipboard(st.session_state.results, "Copy Full Report")
-        
-        # Basic JS copy button (less ideal as it requires user interaction with a text area)
-        # A true "click button to copy text" is harder without a dedicated component or more complex JS.
-        # For this version, we'll just display results. Copy button can be a further refinement if a good component isn't found.
-        st.markdown("---") # Separator before copy option
-        # st.text_area("Copyable Report:", st.session_state.results, height=200, key="copy_report_area")
-        # st.markdown("<small>You can select the text above and copy it manually.</small>", unsafe_allow_html=True)
-        # If streamlit_extras has a copy button component like `stx.copy_button`, it would be:
-        # import streamlit_ext as stx
-        # if streamlit_extras_available and hasattr(stx, "copy_button"):
-        #    stx.copy_button(st.session_state.results, "Copy Full Report")
-        # else:
-        #    st.write("To copy, select text from the report above.")
-        # For now, just a note:
         results_display_area.markdown("*(To copy the report, please select the text and use Ctrl+C or Cmd+C.)*", unsafe_allow_html=True)
-
     else:
         results_display_area.info("Research findings will appear here.")
 
-    st.sidebar.markdown("---")
-    # Proactive warnings for essential configurations
-    import os
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    ncbi_email = os.getenv("NCBI_EMAIL")
 
-    if not azure_endpoint:
-        st.sidebar.warning("⚠️ AZURE_OPENAI_ENDPOINT is not set. LLM features will be unavailable.")
-    
-    if not ncbi_email or ncbi_email == "your_email@example.com":
-        st.sidebar.warning("⚠️ NCBI_EMAIL is not set or uses a placeholder. PubMed searches may be less reliable. Please set it in your environment.")
+def main():
+    st.set_page_config(layout="wide", page_title="Deep Q&A Research Agent")
 
-    st.sidebar.caption("Ensure Azure OpenAI and NCBI_EMAIL environment variables are correctly set as per the README.")
+    # Initialize login state if not present
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "login_error" not in st.session_state: # To store login error messages
+        st.session_state.login_error = ""
 
+
+    if st.session_state.logged_in:
+        display_main_app()
+    else:
+        show_login_form()
 
 if __name__ == "__main__":
     main()

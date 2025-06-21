@@ -44,9 +44,23 @@ This includes libraries like Streamlit, Langchain, FAISS, PyPDF2, DuckDuckGo-Sea
 
 ### 4. Configure Environment Variables
 
-It's recommended to create a `.env` file in the project root directory and list your environment variables there. Add `python-dotenv` to your `requirements.txt` and load it in `app.py` if you want automatic loading from `.env`. Alternatively, export these variables in your shell.
+This project uses a `.env` file to manage environment variables. The application will automatically load variables from a file named `.env` located in the project root directory at startup.
 
-Required variables:
+**Steps to Configure:**
+
+1.  **Create a `.env` file:**
+    Copy the provided template file `.env.example` to a new file named `.env` in the project root:
+    ```bash
+    cp .env.example .env
+    ```
+
+2.  **Edit `.env`:**
+    Open the newly created `.env` file and fill in your actual credentials and configuration values. **Do not commit the `.env` file to version control.** It should contain your secrets.
+
+3.  **`.gitignore`:**
+    The `.gitignore` file in this project is already configured to ignore `.env` files, ensuring your secrets are not accidentally committed.
+
+**Required Variables (to be set in your `.env` file):**
 
 *   **Azure OpenAI Credentials:**
     *   `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI resource endpoint.
@@ -60,18 +74,12 @@ Required variables:
 
 *   **NCBI Email (for PubMed Access):**
     Set this for respectful use of the NCBI Entrez API.
-    `NCBI_EMAIL="your.email@example.com"` (replace with your actual email).
+    `NCBI_EMAIL="your_actual_email@example.com"` (replace with your actual email).
 
-Example `.env` file content:
-```env
-AZURE_OPENAI_ENDPOINT="https://YOUR_RESOURCE_NAME.openai.azure.com/"
-AZURE_OPENAI_DEPLOYMENT_NAME="YOUR_DEPLOYMENT_NAME"
-# AZURE_CLIENT_ID="YOUR_SP_CLIENT_ID" # If using Service Principal
-# AZURE_TENANT_ID="YOUR_AZURE_TENANT_ID" # If using Service Principal
-# AZURE_CLIENT_SECRET="YOUR_SP_CLIENT_SECRET" # If using Service Principal
-NCBI_EMAIL="your.email@example.com"
-```
-If you use a `.env` file, you would add `from dotenv import load_dotenv; load_dotenv()` at the beginning of `app.py` and add `python-dotenv` to `requirements.txt`. For now, the README assumes manual export or direct setting if `.env` isn't explicitly loaded by the app.
+*   **Specialized Model Settings (o3-mini):**
+    *   The application automatically applies specialized settings if your `AZURE_OPENAI_DEPLOYMENT_NAME` (set in `.env`) includes "o3-mini". See `.env.example` for details.
+
+The `.env.example` file provides a template for all these variables.
 
 ## Running the Application
 Once all dependencies are installed and environment variables are configured:
@@ -81,11 +89,22 @@ streamlit run app.py
 Access the application in your web browser, typically at `http://localhost:8501`.
 
 ## Usage
+
+### Logging In
+The application now features a simple login page to control access.
+-   **Default Username:** `admin`
+-   **Default Password:** `password` (Note: This is defined in `app.py` and can be changed there.)
+
+**Important Security Note:** These default credentials are hardcoded and are **highly insecure**. This login mechanism is intended for basic local development or demo purposes only and should **not** be used in a production or sensitive environment without implementing a proper, secure authentication system.
+
+### Performing Research
+Once logged in:
 1.  **Enter Research Question:** Type your question in the sidebar.
 2.  **Select Data Sources:** Choose from "PubMed Articles", "DuckDuckGo Search", and "Indexed PDFs".
 3.  **Upload PDFs (Optional):** If "Indexed PDFs" is selected, upload relevant **text-based digital** PDF files. They will be processed and indexed for semantic search for the current session.
 4.  **Start Research:** Click the "Start Research" button.
 5.  **View Results:** The agent will fetch data from selected sources, process PDFs, query the LLM, and display a synthesized answer. A log of actions is also shown.
+6.  **Logout:** A logout button is available in the sidebar.
 
 ## Project Structure
 -   `app.py`: Main Streamlit application file.
