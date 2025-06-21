@@ -11,10 +11,13 @@ duckduckgo-search
 # pdf2image # REMOVED
 # Vector DB & Embeddings
 langchain
+langchain-community
 sentence-transformers
 faiss-cpu
 # Streamlit Extras (Optional - for copy button)
 streamlit-extras
+# Word document export
+python-docx
 
 # Environment variable management
 python-dotenv 

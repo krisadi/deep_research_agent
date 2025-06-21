@@ -2,7 +2,7 @@
 from langchain.vectorstores import FAISS
 from langchain.embeddings import SentenceTransformerEmbeddings
 from langchain.docstore.document import Document as LangchainDocument
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 
 # Using a common open-source embedding model
 DEFAULT_EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
