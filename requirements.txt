@@ -1,0 +1,22 @@
+streamlit
+openai
+azure-identity
+PyPDF2
+BioPython
+# Web Search & Content
+duckduckgo-search
+# PDF OCR & Processing (OCR REMOVED)
+# pytesseract # REMOVED
+# Pillow # REMOVED
+# pdf2image # REMOVED
+# Vector DB & Embeddings
+langchain
+sentence-transformers
+faiss-cpu
+# Streamlit Extras (Optional - for copy button)
+streamlit-extras
+
+# Environment variable management
+python-dotenv 
+
+# pdfplumber # Retaining as a comment from previous version, not actively used.
