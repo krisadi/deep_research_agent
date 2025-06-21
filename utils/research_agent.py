@@ -126,6 +126,14 @@ def conduct_research(
 
     # 2. Fetch articles from PubMed
     if SOURCE_PUBMED in selected_data_sources:
+        import os # For getenv
+        ncbi_email = os.getenv("NCBI_EMAIL")
+        if not ncbi_email or ncbi_email == "your_email@example.com":
+            warn_msg = "NCBI_EMAIL environment variable is not set or uses a placeholder. PubMed search functionality might be limited or unreliable. Please configure it for optimal results."
+            _progress(f"Warning: {warn_msg}")
+            processing_errors.append(warn_msg)
+            # Continue with the search, pubmed_fetcher has its own console warning.
+
         _progress(f"Fetching up to {max_pubmed_articles} PubMed articles for query: '{query}'...")
         if not query:
             _progress("Skipping PubMed search as query is empty (though source was selected).")

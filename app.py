@@ -171,7 +171,18 @@ def main():
         results_display_area.info("Research findings will appear here.")
 
     st.sidebar.markdown("---")
-    st.sidebar.caption("Ensure Azure OpenAI, NCBI_EMAIL, and Tesseract OCR (system install) are configured as per README.")
+    # Proactive warnings for essential configurations
+    import os
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    ncbi_email = os.getenv("NCBI_EMAIL")
+
+    if not azure_endpoint:
+        st.sidebar.warning("⚠️ AZURE_OPENAI_ENDPOINT is not set. LLM features will be unavailable.")
+    
+    if not ncbi_email or ncbi_email == "your_email@example.com":
+        st.sidebar.warning("⚠️ NCBI_EMAIL is not set or uses a placeholder. PubMed searches may be less reliable. Please set it in your environment.")
+
+    st.sidebar.caption("Ensure Azure OpenAI and NCBI_EMAIL environment variables are correctly set as per the README.")
 
 
 if __name__ == "__main__":
