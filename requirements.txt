@@ -5,10 +5,10 @@ PyPDF2
 BioPython
 # Web Search & Content
 duckduckgo-search
-# PDF OCR & Processing
-pytesseract
-Pillow
-pdf2image
+# PDF OCR & Processing (OCR REMOVED)
+# pytesseract # REMOVED
+# Pillow # REMOVED
+# pdf2image # REMOVED
 # Vector DB & Embeddings
 langchain
 sentence-transformers
