@@ -895,8 +895,17 @@ def display_main_app():
         # Display main content
         st.markdown("### 📝 Research Findings")
         st.markdown(st.session_state.results, unsafe_allow_html=True)
-        st.markdown("**�� Copy Research Findings:**")
-        st.text_area("", value=st.session_state.results, height=100, key="copy_final_llm_output", label_visibility="collapsed")
+        
+        # Add copy functionality for research findings
+        st.markdown("---")
+        st.markdown("### 📋 Copy Research Findings")
+        st.text_area(
+            "Copy the research findings below:",
+            value=st.session_state.results,
+            height=150,
+            key="copy_final_llm_output",
+            help="Select all text (Ctrl+A) and copy (Ctrl+C) to copy the research findings"
+        )
         
         # Add PDF type summary if PDF sources exist
         pdf_sources = st.session_state.source_data.get('pdf_sources', [])
@@ -1060,8 +1069,17 @@ def display_main_app():
                     
                     content = source_data_item.get('content', '')
                     st.text_area("📋 Copyable Content", value=content, height=300, key="sidebar_content")
-                    st.markdown("**📋 Copy Source Content:**")
-                    st.text_area("", value=content, height=100, key=f"copy_source_content_{st.session_state.selected_source_key}_{st.session_state.selected_source_data_index}", label_visibility="collapsed")
+                    
+                    # Add copy functionality for source content
+                    st.markdown("---")
+                    st.markdown("### 📋 Copy Source Content")
+                    st.text_area(
+                        "Copy the source content below:",
+                        value=content,
+                        height=150,
+                        key=f"copy_source_content_{st.session_state.selected_source_key}_{st.session_state.selected_source_data_index}",
+                        help="Select all text (Ctrl+A) and copy (Ctrl+C) to copy the source content"
+                    )
                     
                     url = source_data_item.get('url', '')
                     if url:
