@@ -2,7 +2,6 @@
 from . import pubmed_fetcher
 from . import llm_handler
 from . import duckduckgo_searcher
-from .document_indexer import DocumentIndexer
 from .vector_store_handler import VectorStoreHandler
 
 from typing import List, Dict, Optional, Callable, Any, Set, Union
@@ -16,7 +15,7 @@ MAX_PDF_CHUNKS_TO_LLM = 5 # Max relevant PDF chunks to feed to LLM from vector s
 # Data source constants
 SOURCE_PDF = "Indexed PDFs"
 SOURCE_PUBMED = "PubMed Articles"
-SOURCE_DUCKDUCKGO = "DuckDuckGo Search"
+SOURCE_DUCKDUGO = "DuckDuckGo Search"
 
 
 def conduct_research(
@@ -27,10 +26,6 @@ def conduct_research(
     max_pubmed_articles: int = 3,
     on_progress_update: Optional[Callable[[str], None]] = None,
     pdf_vector_store: Optional[Any] = None,  # Pre-indexed vector store
-    # Allow passing existing vector store and indexer for session persistence if implemented later
-    # For now, they are created per call if PDF source is selected.
-    # vector_store_handler: Optional[VectorStoreHandler] = None, 
-    # document_indexer: Optional[DocumentIndexer] = None
 ) -> Dict[str, Any]:
     """
     Conducts research based on a query, selected data sources, optional PDFs, and PubMed articles.
@@ -56,61 +51,6 @@ def conduct_research(
     _progress("Starting research process...")
     _progress(f"Query: {query}")
     _progress(f"Selected data sources: {', '.join(selected_data_sources)}")
-
-    # Initialize handlers if PDF processing is needed
-    # For simplicity in this iteration, VectorStoreHandler and DocumentIndexer are created on each call
-    # if PDFs are a selected source. A more advanced version would persist the index across calls/sessions.
-    if SOURCE_PDF in selected_data_sources and uploaded_pdf_files:
-        if pdf_vector_store and pdf_vector_store.vector_store:
-            _progress("Using pre-indexed PDF vector store...")
-        else:
-            try:
-                _progress("Initializing Document Indexer and Vector Store for PDF processing...")
-                doc_indexer = DocumentIndexer() # Uses default chunk_size/overlap
-                pdf_vector_store = VectorStoreHandler() # Uses default embedding model
-                
-                all_pdf_chunks = []
-                for uploaded_file in uploaded_pdf_files:
-                    pdf_name = getattr(uploaded_file, 'name', 'uploaded_pdf_file')
-                    pdf_type = pdf_types.get(pdf_name, 'Unknown') if pdf_types else 'Unknown'
-                    _progress(f"Processing PDF: {pdf_name} (Type: {pdf_type}) for indexing...")
-                    
-                    # Ensure the file stream is in a compatible format (BytesIO)
-                    # Streamlit's UploadedFile is already IO-like.
-                    # We might need to read its content if the underlying library expects bytes.
-                    # For PyPDF2 and pdf2image, passing the stream directly or after .read() works.
-                    
-                    # Reset stream for multiple reads if necessary (pdf_processor used to do this)
-                    uploaded_file.seek(0) 
-                    
-                    try:
-                        chunks = doc_indexer.process_pdf(uploaded_file, pdf_name, pdf_type)
-                        if chunks:
-                            all_pdf_chunks.extend(chunks)
-                            _progress(f"Successfully processed and chunked '{pdf_name}' (Type: {pdf_type}). Found {len(chunks)} chunks.")
-                        else:
-                            warning_msg = f"Warning: No text chunks extracted from PDF '{pdf_name}' (Type: {pdf_type}). It might be empty or purely image-based with OCR issues."
-                            _progress(warning_msg)
-                            processing_errors.append(warning_msg)
-                    except Exception as e_pdf_proc:
-                        err_msg = f"Error processing PDF '{pdf_name}' (Type: {pdf_type}): {e_pdf_proc}"
-                        _progress(err_msg)
-                        processing_errors.append(err_msg)
-
-                if all_pdf_chunks:
-                    _progress(f"Indexing {len(all_pdf_chunks)} total chunks from all PDFs...")
-                    pdf_vector_store.init_store_from_documents(all_pdf_chunks)
-                    _progress("PDF chunks indexed successfully in FAISS.")
-                    _progress(f"Vector store status: {pdf_vector_store.get_store_status()}")
-                else:
-                    _progress("No PDF chunks were available to build the vector index.")
-                    pdf_vector_store = None # Ensure it's None if no docs were indexed
-
-            except Exception as e_init: # Catch errors from DocumentIndexer or VectorStoreHandler init
-                err_msg = f"Failed to initialize PDF processing pipeline: {e_init}"
-                _progress(err_msg)
-                processing_errors.append(err_msg)
-                pdf_vector_store = None # Disable PDF search for this run
 
     # 1. Retrieve relevant chunks from Indexed PDFs
     if SOURCE_PDF in selected_data_sources and pdf_vector_store and pdf_vector_store.vector_store:
@@ -158,9 +98,6 @@ def conduct_research(
             processing_errors.append(err_msg)
     elif SOURCE_PDF in selected_data_sources and not uploaded_pdf_files and not pdf_vector_store:
         _progress("PDF source selected, but no PDF files were uploaded or indexed.")
-    elif SOURCE_PDF in selected_data_sources and (not pdf_vector_store or not pdf_vector_store.vector_store) and uploaded_pdf_files:
-         _progress("PDFs were uploaded and PDF source selected, but PDF vector index is not available (likely due to earlier processing errors).")
-
 
     # 2. Fetch articles from PubMed
     if SOURCE_PUBMED in selected_data_sources:
@@ -205,7 +142,7 @@ def conduct_research(
                 _progress("No relevant articles found on PubMed for the query.")
     
     # 3. Fetch search results from DuckDuckGo
-    if SOURCE_DUCKDUCKGO in selected_data_sources:
+    if SOURCE_DUCKDUGO in selected_data_sources:
         _progress(f"Fetching up to {MAX_DUCKDUCKGO_RESULTS} DuckDuckGo search results for query: '{query}'...")
         if not query:
             _progress("Skipping DuckDuckGo search as query is empty (though source was selected).")

@@ -1,7 +1,7 @@
 import streamlit as st
 from dotenv import load_dotenv # For loading .env file
 from utils import research_agent # research_agent will import its dependencies
-from utils.research_agent import SOURCE_PDF, SOURCE_PUBMED, SOURCE_DUCKDUCKGO # Import constants
+from utils.research_agent import SOURCE_PUBMED, SOURCE_DUCKDUGO # Import constants
 from utils.docx_exporter import create_research_report_docx, save_docx_to_bytes, generate_docx_filename
 from typing import Set
 import os # For environment variable checks
@@ -679,389 +679,80 @@ def display_main_app():
             </div>
             """, unsafe_allow_html=True)
         
-        # Create tabs for better organization
-        tab1, tab2 = st.tabs(["🔍 Research", "📄 Documents"])
+        st.markdown("""
+        <div style="background: #2c3e50; 
+                    color: white; 
+                    padding: 1.5rem; 
+                    border-radius: 10px; 
+                    margin-bottom: 1.5rem;
+                    text-align: center;
+                    border-left: 4px solid #3498db;">
+            <h2 style="margin: 0; font-size: 1.5rem;">⚙️ Research Configuration</h2>
+            <p style="margin: 0.5rem 0 0 0; opacity: 0.9; font-size: 0.9rem;">Configure your research parameters</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        with tab1:
-            st.markdown("""
-            <div style="background: #2c3e50; 
-                        color: white; 
-                        padding: 1.5rem; 
-                        border-radius: 10px; 
-                        margin-bottom: 1.5rem;
-                        text-align: center;
-                        border-left: 4px solid #3498db;">
-                <h2 style="margin: 0; font-size: 1.5rem;">⚙️ Research Configuration</h2>
-                <p style="margin: 0.5rem 0 0 0; opacity: 0.9; font-size: 0.9rem;">Configure your research parameters</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Query input in a styled container
-            st.markdown("""
-            <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; border: 1px solid #e9ecef;">
-                <h4 style="margin: 0 0 1rem 0; color: #2c3e50;">🔍 Research Query</h4>
-            """, unsafe_allow_html=True)
-            
-            query = st.text_area("Enter your research question:", 
-                                height=120,
-                                placeholder="e.g., What are the latest developments in machine learning?",
-                                help="Your main research question that will be used across all selected data sources.")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            # Data sources in a styled container
-            st.markdown("""
-            <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; border: 1px solid #e9ecef;">
-                <h4 style="margin: 0 0 1rem 0; color: #2c3e50;">📊 Data Sources</h4>
-            """, unsafe_allow_html=True)
+        # Query input in a styled container
+        st.markdown("""
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; border: 1px solid #e9ecef;">
+            <h4 style="margin: 0 0 1rem 0; color: #2c3e50;">🔍 Research Query</h4>
+        """, unsafe_allow_html=True)
         
-            available_sources = [SOURCE_PUBMED, SOURCE_DUCKDUCKGO, SOURCE_PDF]
-            default_sources = [SOURCE_PUBMED, SOURCE_DUCKDUCKGO] 
-
-            selected_sources: Set[str] = set(st.multiselect(
-                "Select information sources:",
-                options=available_sources,
-                default=default_sources,
-                help="Choose which sources to query for information."
-            ))
-
-            # PDF document selection (simplified - just show what's available)
-            if SOURCE_PDF in selected_sources:
-                st.markdown("#### 📄 PDF Documents")
-                
-                # Get vector store from session state
-                pdf_vector_store = st.session_state.get('pdf_vector_store', None)
-                
-                if pdf_vector_store and pdf_vector_store.vector_store:
-                    # Get store status to show number of indexed documents
-                    store_status = pdf_vector_store.get_store_status()
-                    num_docs = store_status.get('num_docs', 0)
-                    
-                    # Additional check: try to access the docstore directly
-                    try:
-                        if hasattr(pdf_vector_store.vector_store, 'docstore') and pdf_vector_store.vector_store.docstore:
-                            direct_doc_count = len(pdf_vector_store.vector_store.docstore._dict)
-                            # Use the direct count if it's more reliable
-                            if direct_doc_count > 0:
-                                num_docs = direct_doc_count
-                    except Exception as e:
-                        pass
-                    
-                    if num_docs > 0:
-                        st.success(f"✅ {num_docs} PDF chunk(s) indexed and ready for research")
-                        
-                        # Get unique PDF types from the vector store metadata
-                        available_pdf_types = set()
-                        if hasattr(pdf_vector_store, 'vector_store') and pdf_vector_store.vector_store:
-                            # Try to get document metadata from the vector store
-                            try:
-                                # Access the document store to get metadata
-                                if hasattr(pdf_vector_store.vector_store, 'docstore') and pdf_vector_store.vector_store.docstore:
-                                    for doc_id in pdf_vector_store.vector_store.docstore._dict:
-                                        doc = pdf_vector_store.vector_store.docstore._dict[doc_id]
-                                        if hasattr(doc, 'metadata') and doc.metadata:
-                                            pdf_type = doc.metadata.get('pdf_type', 'Unknown')
-                                            available_pdf_types.add(pdf_type)
-                            except Exception as e:
-                                # Fallback to session state if vector store access fails
-                                available_pdf_types = set(st.session_state.uploaded_pdfs.values())
-                        
-                        # If we couldn't get types from vector store, use session state
-                        if not available_pdf_types and st.session_state.uploaded_pdfs:
-                            available_pdf_types = set(st.session_state.uploaded_pdfs.values())
-                        
-                        if available_pdf_types:
-                            available_pdf_types = sorted(list(available_pdf_types))
-                            
-                            # PDF type selection for research
-                            st.markdown("**Select PDF types to include in research:**")
-                            
-                            selected_pdf_types_for_research = st.multiselect(
-                                "Choose PDF types to analyze:",
-                                options=available_pdf_types,
-                                default=available_pdf_types,  # Include all by default
-                                help="Select which types of PDFs to include in your research analysis"
-                            )
-                            
-                            # Store selected types for research
-                            st.session_state.selected_pdf_types_for_research = selected_pdf_types_for_research
-                            
-                            # Show summary of indexed PDFs by selected types
-                            st.markdown("**Indexed PDFs by type:**")
-                            for pdf_type in selected_pdf_types_for_research:
-                                # Count documents of this type from vector store
-                                type_count = 0
-                                try:
-                                    if hasattr(pdf_vector_store.vector_store, 'docstore') and pdf_vector_store.vector_store.docstore:
-                                        for doc_id in pdf_vector_store.vector_store.docstore._dict:
-                                            doc = pdf_vector_store.vector_store.docstore._dict[doc_id]
-                                            if hasattr(doc, 'metadata') and doc.metadata:
-                                                if doc.metadata.get('pdf_type') == pdf_type:
-                                                    type_count += 1
-                                except:
-                                    # Fallback to session state count
-                                    type_count = len([name for name, type_val in st.session_state.uploaded_pdfs.items() if type_val == pdf_type])
-                                
-                                st.markdown(f"• **{pdf_type}**: {type_count} chunk(s)")
-                        else:
-                            st.info("📋 Indexed documents available for research")
-                    else:
-                        st.warning("⚠️ No PDF chunks indexed. Switch to Documents tab to upload and index files.")
-                else:
-                    st.warning("⚠️ No PDFs indexed. Switch to Documents tab to upload files.")
-
-            # PubMed options with increased limit
-            if SOURCE_PUBMED in selected_sources:
-                st.markdown("#### 🔬 PubMed Settings")
-                max_pubmed_articles = st.slider("Max articles:", 
-                                                min_value=1, max_value=100, value=10,
-                                                help="Number of relevant PubMed articles to fetch (up to 100).")
-            else:
-                max_pubmed_articles = 0
-
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            # Add spacing before start button
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # Start button in a prominent container
-            st.markdown("""
-            <div style="background: #2c3e50; 
-                        border-radius: 8px; 
-                        padding: 1rem; 
-                        margin-bottom: 1.5rem; 
-                        border: 1px solid #34495e;
-                        text-align: center;">
-                <h4 style="margin: 0 0 1rem 0; color: white;">🚀 Execute Research</h4>
-            """, unsafe_allow_html=True)
-            
-            start_button = st.button("🚀 Start Research", 
-                                    disabled=st.session_state.processing, 
-                                    type="primary",
-                                    use_container_width=True)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+        query = st.text_area("Enter your research question:", 
+                            height=120,
+                            placeholder="e.g., What are the latest developments in machine learning?",
+                            help="Your main research question that will be used across all selected data sources.")
         
-        with tab2:
-            st.markdown("""
-            <div style="background: #2c3e50; 
-                        color: white; 
-                        padding: 1.5rem; 
-                        border-radius: 10px; 
-                        margin-bottom: 1.5rem;
-                        text-align: center;
-                        border-left: 4px solid #3498db;">
-                <h2 style="margin: 0; font-size: 1.5rem;">📄 Document Management</h2>
-                <p style="margin: 0.5rem 0 0 0; opacity: 0.9; font-size: 0.9rem;">Upload and categorize your documents</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Initialize session state for uploaded PDFs if not exists
-            if 'uploaded_pdfs' not in st.session_state:
-                st.session_state.uploaded_pdfs = {}
-            if 'uploaded_files' not in st.session_state:
-                st.session_state.uploaded_files = {}
-            
-            # PDF type selection first
-            st.markdown("#### 🏷️ Select PDF Type")
-            st.markdown("Choose the type for the PDFs you want to upload:")
-            
-            # Predefined PDF types
-            predefined_types = [
-                "Patient_Data", "Social_Media_Data", "Research_Paper", 
-                "Clinical_Trial", "Medical_Report", "Survey_Data",
-                "Financial_Report", "Legal_Document", "Technical_Manual",
-                "Academic_Paper", "News_Article", "Government_Report",
-                "Business_Plan", "Marketing_Material", "Other"
-            ]
-            
-            # Type selection
-            selected_pdf_type = st.selectbox(
-                "Choose PDF type:",
-                options=predefined_types,
-                index=len(predefined_types) - 1,  # Default to "Other"
-                help="Select the type of content for the PDFs you want to upload"
-            )
-            
-            # Custom type input
-            st.markdown("#### ✏️ Custom PDF Type")
-            custom_type = st.text_input(
-                "Or enter a custom type:",
-                placeholder="e.g., Clinical_Study_2024, Patient_Survey_Q1",
-                help="Enter a custom type if none of the predefined types match"
-            )
-            
-            # Use custom type if provided, otherwise use selected type
-            current_pdf_type = custom_type.strip() if custom_type.strip() else selected_pdf_type
-            
-            # PDF upload section
-            st.markdown("#### 📄 Upload PDF Documents")
-            st.markdown(f"**Uploading PDFs as type: {current_pdf_type}**")
-            
-            uploaded_files = st.file_uploader(
-                f"Upload PDF files (Type: {current_pdf_type}):", 
-                accept_multiple_files=True, 
-                type="pdf",
-                help=f"Upload multiple PDF documents. All files will be categorized as '{current_pdf_type}'"
-            )
-            
-            if uploaded_files:
-                st.success(f"✅ {len(uploaded_files)} PDF(s) ready to upload as '{current_pdf_type}'")
-                
-                # Add spacing before submit button
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # Submit button to confirm upload
-                if st.button("📤 Submit Documents", type="primary", use_container_width=True):
-                    # Store uploaded files in session state
-                    for uploaded_file in uploaded_files:
-                        st.session_state.uploaded_files[uploaded_file.name] = uploaded_file
-                        st.session_state.uploaded_pdfs[uploaded_file.name] = current_pdf_type
-                    
-                    # Index the documents immediately
-                    try:
-                        with st.spinner("🔍 Indexing documents for search..."):
-                            # Import required modules for indexing
-                            from utils.document_indexer import DocumentIndexer
-                            from utils.vector_store_handler import VectorStoreHandler
-                            
-                            # Get existing vector store or create new one
-                            existing_vector_store = st.session_state.get('pdf_vector_store', None)
-                            if existing_vector_store and existing_vector_store.vector_store:
-                                vector_store = existing_vector_store
-                            else:
-                                vector_store = VectorStoreHandler()
-                            
-                            # Initialize indexer
-                            doc_indexer = DocumentIndexer()
-                            
-                            all_pdf_chunks = []
-                            
-                            # Process each uploaded file
-                            for uploaded_file in uploaded_files:
-                                pdf_name = uploaded_file.name
-                                pdf_type = current_pdf_type
-                                
-                                # Reset file stream for reading
-                                uploaded_file.seek(0)
-                                
-                                # Process PDF and get chunks
-                                chunks = doc_indexer.process_pdf(uploaded_file, pdf_name, pdf_type)
-                                if chunks:
-                                    all_pdf_chunks.extend(chunks)
-                            
-                            # Build or add to vector store if chunks were created
-                            if all_pdf_chunks:
-                                if existing_vector_store and existing_vector_store.vector_store:
-                                    # Add to existing vector store
-                                    vector_store.add_documents_to_store(all_pdf_chunks)
-                                else:
-                                    # Create new vector store
-                                    vector_store.init_store_from_documents(all_pdf_chunks)
-                                
-                                # Check if vector store was created/updated
-                                if vector_store.vector_store:
-                                    # Store the vector store in session state
-                                    st.session_state.pdf_vector_store = vector_store
-                                    st.success(f"✅ Successfully uploaded and indexed {len(uploaded_files)} PDF(s) as '{current_pdf_type}'")
-                                else:
-                                    st.error("❌ Vector store creation/update failed")
-                                    st.success(f"✅ Successfully uploaded {len(uploaded_files)} PDF(s) as '{current_pdf_type}' (indexing failed)")
-                            else:
-                                st.warning("⚠️ No text could be extracted from the uploaded PDFs")
-                                st.success(f"✅ Successfully uploaded {len(uploaded_files)} PDF(s) as '{current_pdf_type}' (no text content found)")
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error during indexing: {str(e)}")
-                        st.success(f"✅ Successfully uploaded {len(uploaded_files)} PDF(s) as '{current_pdf_type}' (indexing failed)")
-                    
-                    st.rerun()
-                
-                # Add spacing before document summary
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # Show current PDFs summary
-                st.markdown("#### 📋 Current Documents")
-                
-                # Get vector store from session state
-                pdf_vector_store = st.session_state.get('pdf_vector_store', None)
-                
-                if pdf_vector_store and pdf_vector_store.vector_store:
-                    # Get store status to show number of indexed documents
-                    store_status = pdf_vector_store.get_store_status()
-                    num_docs = store_status.get('num_docs', 0)
-                    
-                    if num_docs > 0:
-                        st.success(f"✅ {num_docs} PDF chunk(s) indexed and ready for research")
-                        
-                        # Get unique PDF types and counts from the vector store metadata
-                        pdf_type_counts = {}
-                        unique_files = set()
-                        
-                        try:
-                            # Access the document store to get metadata
-                            if hasattr(pdf_vector_store.vector_store, 'docstore') and pdf_vector_store.vector_store.docstore:
-                                for doc_id in pdf_vector_store.vector_store.docstore._dict:
-                                    doc = pdf_vector_store.vector_store.docstore._dict[doc_id]
-                                    if hasattr(doc, 'metadata') and doc.metadata:
-                                        pdf_type = doc.metadata.get('pdf_type', 'Unknown')
-                                        source_file = doc.metadata.get('source', 'Unknown')
-                                        
-                                        pdf_type_counts[pdf_type] = pdf_type_counts.get(pdf_type, 0) + 1
-                                        unique_files.add(source_file)
-                        except Exception as e:
-                            # Fallback to session state if vector store access fails
-                            st.warning(f"⚠️ Could not read vector store metadata: {str(e)}")
-                            if st.session_state.uploaded_pdfs:
-                                for pdf_name, pdf_type in st.session_state.uploaded_pdfs.items():
-                                    pdf_type_counts[pdf_type] = pdf_type_counts.get(pdf_type, 0) + 1
-                                    unique_files.add(pdf_name)
-                        
-                        # Display indexed documents by type
-                        if pdf_type_counts:
-                            st.markdown("**Indexed documents by type:**")
-                            for pdf_type, count in sorted(pdf_type_counts.items()):
-                                st.markdown(f"• **{pdf_type}**: {count} chunk(s)")
-                            
-                            st.markdown(f"**Total:** {len(unique_files)} file(s) → {num_docs} chunk(s)")
-                        else:
-                            st.info("📋 Indexed documents available for research")
-                    else:
-                        st.warning("⚠️ No PDF chunks indexed. Upload and submit files to make them available for research.")
-                elif st.session_state.uploaded_pdfs:
-                    # Fallback to session state if no vector store
-                    st.info("📋 Documents uploaded but not yet indexed")
-                    
-                    # Group by type
-                    type_counts = {}
-                    for pdf_name, pdf_type in st.session_state.uploaded_pdfs.items():
-                        type_counts[pdf_type] = type_counts.get(pdf_type, 0) + 1
-                    
-                    st.markdown("**Uploaded documents by type:**")
-                    for pdf_type, count in sorted(type_counts.items()):
-                        st.markdown(f"• **{pdf_type}**: {count} file(s)")
-                else:
-                    st.info("No PDFs currently uploaded")
-                
-                # Show pending uploads if any
-                if uploaded_files:
-                    if st.session_state.uploaded_pdfs:
-                        st.markdown("**Ready to submit:**")
-                    else:
-                        st.markdown("**Ready to submit:**")
-                    st.markdown(f"• **{current_pdf_type}**: {len(uploaded_files)} file(s) pending submission")
-                
-                # Add spacing before clear button
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # Clear all button
-                if st.button("🗑️ Clear All Documents", type="secondary", use_container_width=True):
-                    st.session_state.uploaded_pdfs = {}
-                    st.session_state.uploaded_files = {}
-                    st.rerun()
-            else:
-                st.info("📁 No PDFs uploaded yet. Select a type and upload files to get started.")
+        st.markdown("</div>", unsafe_allow_html=True)
         
+        # Data sources in a styled container
+        st.markdown("""
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; border: 1px solid #e9ecef;">
+            <h4 style="margin: 0 0 1rem 0; color: #2c3e50;">📊 Data Sources</h4>
+        """, unsafe_allow_html=True)
+    
+        available_sources = [SOURCE_PUBMED, SOURCE_DUCKDUGO]
+        default_sources = [SOURCE_PUBMED, SOURCE_DUCKDUGO] 
+
+        selected_sources: Set[str] = set(st.multiselect(
+            "Select information sources:",
+            options=available_sources,
+            default=default_sources,
+            help="Choose which sources to query for information."
+        ))
+
+        # PubMed options with increased limit
+        if SOURCE_PUBMED in selected_sources:
+            st.markdown("#### 🔬 PubMed Settings")
+            max_pubmed_articles = st.slider("Max articles:", 
+                                            min_value=1, max_value=100, value=10,
+                                            help="Number of relevant PubMed articles to fetch (up to 100).")
+        else:
+            max_pubmed_articles = 0
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Add spacing before start button
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Start button in a prominent container
+        st.markdown("""
+        <div style="background: #2c3e50; 
+                    border-radius: 8px; 
+                    padding: 1rem; 
+                    margin-bottom: 1.5rem; 
+                    border: 1px solid #34495e;
+                    text-align: center;">
+            <h4 style="margin: 0 0 1rem 0; color: white;">🚀 Execute Research</h4>
+        """, unsafe_allow_html=True)
+        
+        start_button = st.button("🚀 Start Research", 
+                                disabled=st.session_state.processing, 
+                                type="primary",
+                                use_container_width=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
         # Bottom section with status and actions (outside tabs)
         st.markdown("""
         <div style="background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; border: 1px solid #e9ecef;">
@@ -1137,100 +828,6 @@ def display_main_app():
             st.error("⚠️ Please enter a research question.")
         elif not selected_sources:
             st.error("⚠️ Please select at least one data source.")
-        elif SOURCE_PDF in selected_sources:
-            # Check if PDFs are available for research (either indexed or uploaded)
-            pdf_vector_store = st.session_state.get('pdf_vector_store', None)
-            
-            # Check for indexed PDFs using multiple methods
-            has_indexed_pdfs = False
-            if pdf_vector_store and pdf_vector_store.vector_store:
-                # Try direct docstore access first
-                try:
-                    if hasattr(pdf_vector_store.vector_store, 'docstore') and pdf_vector_store.vector_store.docstore:
-                        direct_doc_count = len(pdf_vector_store.vector_store.docstore._dict)
-                        has_indexed_pdfs = direct_doc_count > 0
-                except Exception as e:
-                    # Fallback to store status
-                    store_status = pdf_vector_store.get_store_status()
-                    has_indexed_pdfs = store_status.get('num_docs', 0) > 0
-            
-            has_uploaded_pdfs = st.session_state.uploaded_pdfs
-            
-            if not has_indexed_pdfs and not has_uploaded_pdfs:
-                st.error(f"⚠️ '{SOURCE_PDF}' is selected, but no PDF files are available for research. Please upload and submit PDFs in the Documents tab.")
-            elif not has_indexed_pdfs and has_uploaded_pdfs:
-                st.error(f"⚠️ '{SOURCE_PDF}' is selected, but uploaded PDFs need to be submitted and indexed. Please click 'Submit Documents' in the Documents tab.")
-            else:
-                # PDFs are available, proceed with research
-                st.session_state.processing = True
-                st.session_state.results = "" 
-                st.session_state.progress_messages = [] 
-                st.session_state.current_query = query  # Store query for export
-                
-                def streamlit_progress_update(message: str):
-                    st.session_state.progress_messages.append(message)
-
-                # Execute research with custom loading spinner
-                show_loading_spinner("🧠 AI is thinking... Performing research")
-                try:
-                    # Get uploaded files from session state if PDF source is selected
-                    uploaded_files = None
-                    if SOURCE_PDF in selected_sources and st.session_state.uploaded_pdfs:
-                        # Filter PDFs based on selected types for research
-                        selected_types = st.session_state.get('selected_pdf_types_for_research', [])
-                        if selected_types:
-                            # Get PDFs that match the selected types
-                            filtered_pdfs = []
-                            for pdf_name, pdf_type in st.session_state.uploaded_pdfs.items():
-                                if pdf_type in selected_types:
-                                    if pdf_name in st.session_state.uploaded_files:
-                                        filtered_pdfs.append(st.session_state.uploaded_files[pdf_name])
-                            uploaded_files = filtered_pdfs
-                        else:
-                            # If no types selected, use all PDFs
-                            uploaded_files = list(st.session_state.uploaded_files.values())
-                    
-                    # Use pre-indexed vector store if available
-                    pdf_vector_store = st.session_state.get('pdf_vector_store', None)
-                    
-                    # If we have a vector store, we don't need to pass uploaded files
-                    # The research agent will use the vector store directly
-                    if pdf_vector_store and pdf_vector_store.vector_store:
-                        uploaded_files = None  # Vector store will be used instead
-                    
-                    research_result = research_agent.conduct_research(
-                            query=query,
-                            selected_data_sources=selected_sources,
-                            uploaded_pdf_files=uploaded_files if SOURCE_PDF in selected_sources else None,
-                            pdf_types=st.session_state.get('selected_pdf_types_for_research', []) if SOURCE_PDF in selected_sources else None,
-                            max_pubmed_articles=max_pubmed_articles if SOURCE_PUBMED in selected_sources else 0,
-                            on_progress_update=streamlit_progress_update,
-                            pdf_vector_store=pdf_vector_store  # Pass pre-indexed vector store
-                        )
-                    
-                    # Handle new return format
-                    if isinstance(research_result, dict):
-                        st.session_state.results = research_result['report']
-                        st.session_state.source_data = research_result['source_data']
-                        st.session_state.is_raw_data = research_result['is_raw_data']
-                        # Initialize filtered sources to include all sources
-                        st.session_state.filtered_sources = set(range(len(st.session_state.source_data.get('pdf_sources', []) + 
-                                                                       st.session_state.source_data.get('pubmed_sources', []) + 
-                                                                       st.session_state.source_data.get('web_sources', []))))
-                    else:
-                        # Handle legacy string return format
-                        st.session_state.results = research_result
-                        st.session_state.source_data = {}
-                        st.session_state.is_raw_data = True
-                        st.session_state.filtered_sources = set()
-                        
-                except Exception as e:
-                    st.session_state.results = f"An unexpected critical error occurred: {str(e)}"
-                    st.session_state.progress_messages.append(f"CRITICAL ERROR: {str(e)}")
-                    st.error(f"Critical error during research: {str(e)}") 
-                finally:
-                    st.session_state.processing = False
-                    st.rerun()
         else:
             # No PDF source selected, proceed with research
             st.session_state.processing = True
@@ -1244,39 +841,11 @@ def display_main_app():
             # Execute research with custom loading spinner
             show_loading_spinner("🧠 AI is thinking... Performing research")
             try:
-                # Get uploaded files from session state if PDF source is selected
-                uploaded_files = None
-                if SOURCE_PDF in selected_sources and st.session_state.uploaded_pdfs:
-                    # Filter PDFs based on selected types for research
-                    selected_types = st.session_state.get('selected_pdf_types_for_research', [])
-                    if selected_types:
-                        # Get PDFs that match the selected types
-                        filtered_pdfs = []
-                        for pdf_name, pdf_type in st.session_state.uploaded_pdfs.items():
-                            if pdf_type in selected_types:
-                                if pdf_name in st.session_state.uploaded_files:
-                                    filtered_pdfs.append(st.session_state.uploaded_files[pdf_name])
-                        uploaded_files = filtered_pdfs
-                    else:
-                        # If no types selected, use all PDFs
-                        uploaded_files = list(st.session_state.uploaded_files.values())
-                
-                # Use pre-indexed vector store if available
-                pdf_vector_store = st.session_state.get('pdf_vector_store', None)
-                
-                # If we have a vector store, we don't need to pass uploaded files
-                # The research agent will use the vector store directly
-                if pdf_vector_store and pdf_vector_store.vector_store:
-                    uploaded_files = None  # Vector store will be used instead
-                
                 research_result = research_agent.conduct_research(
                         query=query,
                         selected_data_sources=selected_sources,
-                        uploaded_pdf_files=uploaded_files if SOURCE_PDF in selected_sources else None,
-                        pdf_types=st.session_state.get('selected_pdf_types_for_research', []) if SOURCE_PDF in selected_sources else None,
                         max_pubmed_articles=max_pubmed_articles if SOURCE_PUBMED in selected_sources else 0,
                         on_progress_update=streamlit_progress_update,
-                        pdf_vector_store=pdf_vector_store  # Pass pre-indexed vector store
                     )
                 
                 # Handle new return format
@@ -1286,8 +855,8 @@ def display_main_app():
                     st.session_state.is_raw_data = research_result['is_raw_data']
                     # Initialize filtered sources to include all sources
                     st.session_state.filtered_sources = set(range(len(st.session_state.source_data.get('pdf_sources', []) + 
-                                                                   st.session_state.source_data.get('pubmed_sources', []) + 
-                                                                   st.session_state.source_data.get('web_sources', []))))
+                                                                       st.session_state.source_data.get('pubmed_sources', []) + 
+                                                                       st.session_state.source_data.get('web_sources', []))))
                 else:
                     # Handle legacy string return format
                     st.session_state.results = research_result
@@ -1346,7 +915,7 @@ def display_main_app():
                 st.markdown(f"**{len(pdf_sources)}** chunks from **{len(set([s.get('source', '') for s in pdf_sources]))}** file(s)")
         
         st.markdown("</div>", unsafe_allow_html=True)
-        
+
         # Source filtering and regeneration section
         if st.session_state.source_data and any(st.session_state.source_data.values()):
             st.markdown("---")
@@ -1471,25 +1040,20 @@ def display_main_app():
                             'web_sources': []
                         }
                         
-                        pdf_idx = 0
-                        pubmed_idx = 0
-                        web_idx = 0
-                        
-                        for i in range(total_sources):
-                            if i in st.session_state.filtered_sources:
-                                if source_types[i] == 'pdf':
-                                    if pdf_idx < len(st.session_state.source_data.get('pdf_sources', [])):
-                                        filtered_data['pdf_sources'].append(st.session_state.source_data['pdf_sources'][pdf_idx])
-                                    pdf_idx += 1
-                                elif source_types[i] == 'pubmed':
-                                    if pubmed_idx < len(st.session_state.source_data.get('pubmed_sources', [])):
-                                        filtered_data['pubmed_sources'].append(st.session_state.source_data['pubmed_sources'][pubmed_idx])
-                                    pubmed_idx += 1
-                                elif source_types[i] == 'web':
-                                    if web_idx < len(st.session_state.source_data.get('web_sources', [])):
-                                        filtered_data['web_sources'].append(st.session_state.source_data['web_sources'][web_idx])
-                                    web_idx += 1
-                        
+                        for i in st.session_state.filtered_sources: # Iterate through the indices of selected sources
+                            source_type = source_types[i] # Get the type of the selected source
+                            original_index = source_indices[i] # Get the original index within its type list
+
+                            if source_type == 'pdf':
+                                source_object = st.session_state.source_data['pdf_sources'][original_index]
+                                filtered_data['pdf_sources'].append(source_object)
+                            elif source_type == 'pubmed':
+                                source_object = st.session_state.source_data['pubmed_sources'][original_index]
+                                filtered_data['pubmed_sources'].append(source_object)
+                            elif source_type == 'web':
+                                source_object = st.session_state.source_data['web_sources'][original_index]
+                                filtered_data['web_sources'].append(source_object)
+
                         regeneration_progress_update(f"✅ Filtered {len(filtered_data['pdf_sources'])} PDF, {len(filtered_data['pubmed_sources'])} PubMed, and {len(filtered_data['web_sources'])} web sources")
                         
                         # Execute regeneration with custom loading spinner
@@ -1868,6 +1432,7 @@ Begin your synthesized answer below:
                         <strong>Click the 🔍 button next to any source to view its excerpt here.</strong>
                     </div>
                     """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # --- Progress Log ---
     if st.session_state.progress_messages:
