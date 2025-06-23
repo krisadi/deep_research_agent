@@ -68,10 +68,10 @@ def create_research_report_docx(query, results, is_raw_data=False, source_data=N
         # Parse the mixed HTML/Markdown results and convert to Word document
         parse_mixed_content_to_docx(doc, results)
     
-    # For raw data mode, add the source data
-    if is_raw_data and source_data:
+    # Add source data to the document (always include, not just in raw mode)
+    if source_data:
         doc.add_paragraph()  # Spacing
-        doc.add_paragraph("Raw Source Data:", style='Heading 2')
+        doc.add_paragraph("Source Data:", style='Heading 2')
         
         total_sources = sum(len(sources) for sources in source_data.values())
         doc.add_paragraph(f"Total Sources: {total_sources}")
@@ -92,6 +92,9 @@ def create_research_report_docx(query, results, is_raw_data=False, source_data=N
                         add_hyperlink(para, url, url)
                     
                     content = source.get('content', 'No content available.')
+                    # Truncate content if too long for readability
+                    if len(content) > 500:
+                        content = content[:500] + "... [Content truncated for readability]"
                     doc.add_paragraph(f"Content: {content}")
                     doc.add_paragraph()  # Spacing
     
