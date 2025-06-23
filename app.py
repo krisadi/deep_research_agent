@@ -6,6 +6,7 @@ from utils.duckduckgo_searcher import SOURCE_NAME as DUCKDUCKGO_SOURCE_NAME
 from utils.docx_exporter import create_research_report_docx, save_docx_to_bytes, generate_docx_filename
 from typing import Set, List, Dict, Any
 import os # For environment variable checks
+from streamlit_extras.copy_to_clipboard import copy_to_clipboard
 
 # Load environment variables from .env file at the very beginning
 load_dotenv()
@@ -895,6 +896,12 @@ def display_main_app():
         # Display main content
         st.markdown("### 📝 Research Findings")
         st.markdown(st.session_state.results, unsafe_allow_html=True)
+        copy_to_clipboard(
+            st.session_state.results,
+            "📋 Copy Research Findings",
+            "✅ Copied!",
+            key="copy_final_llm_output"
+        )
         
         # Add PDF type summary if PDF sources exist
         pdf_sources = st.session_state.source_data.get('pdf_sources', [])
@@ -1058,6 +1065,12 @@ def display_main_app():
                     
                     content = source_data_item.get('content', '')
                     st.text_area("📋 Copyable Content", value=content, height=300, key="sidebar_content")
+                    copy_to_clipboard(
+                        content,
+                        "📋 Copy Source Content",
+                        "✅ Copied!",
+                        key=f"copy_source_content_{st.session_state.selected_source_key}_{st.session_state.selected_source_data_index}"
+                    )
                     
                     url = source_data_item.get('url', '')
                     if url:
