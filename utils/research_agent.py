@@ -24,7 +24,6 @@ MAX_PDF_CHUNKS_TO_LLM = 5
 
 # Data source constants - will be populated dynamically
 AVAILABLE_SOURCES: Dict[str, Optional[Callable[..., Any]]] = {}
-SOURCE_PDF = "Indexed PDFs" # This remains static as it's a special case
 
 def _get_boolean_env_var(var_name: str) -> bool:
     """Helper to get boolean value from environment variable."""
@@ -33,7 +32,7 @@ def _get_boolean_env_var(var_name: str) -> bool:
 def _initialize_sources():
     """Dynamically initializes the available data sources based on .env configuration."""
     global AVAILABLE_SOURCES
-    AVAILABLE_SOURCES = {SOURCE_PDF: None} # Start with PDF source
+    AVAILABLE_SOURCES = {} # Start with an empty dict
 
     if _get_boolean_env_var('ENABLE_WIKIPEDIA_SEARCH'):
         AVAILABLE_SOURCES[wikipedia_fetcher.SOURCE_NAME] = wikipedia_fetcher.fetch_wikipedia_data
@@ -43,12 +42,12 @@ def _initialize_sources():
         AVAILABLE_SOURCES[arxiv_fetcher.SOURCE_NAME] = arxiv_fetcher.fetch_arxiv_data
     if _get_boolean_env_var('ENABLE_PUBMED_SEARCH'):
         AVAILABLE_SOURCES[pubmed_fetcher.SOURCE_NAME] = pubmed_fetcher.fetch_articles_for_query
-    if _get_boolean_env_var('ENABLE_PDF_API_1'):
-        AVAILABLE_SOURCES[pdf_fetcher_1.SOURCE_NAME] = pdf_fetcher_1.fetch_pdf_data_1
-    if _get_boolean_env_var('ENABLE_PDF_API_2'):
-        AVAILABLE_SOURCES[pdf_fetcher_2.SOURCE_NAME] = pdf_fetcher_2.fetch_pdf_data_2
-    if _get_boolean_env_var('ENABLE_PDF_API_3'):
-        AVAILABLE_SOURCES[pdf_fetcher_3.SOURCE_NAME] = pdf_fetcher_3.fetch_pdf_data_3
+    if _get_boolean_env_var('ENABLE_PDF_FETCHER_1'):
+        AVAILABLE_SOURCES[pdf_fetcher_1.SOURCE_NAME] = pdf_fetcher_1.fetch_pdfs
+    if _get_boolean_env_var('ENABLE_PDF_FETCHER_2'):
+        AVAILABLE_SOURCES[pdf_fetcher_2.SOURCE_NAME] = pdf_fetcher_2.fetch_pdfs
+    if _get_boolean_env_var('ENABLE_PDF_FETCHER_3'):
+        AVAILABLE_SOURCES[pdf_fetcher_3.SOURCE_NAME] = pdf_fetcher_3.fetch_pdfs
     # Add other fetchers here in the same pattern
 
 _initialize_sources()
@@ -60,11 +59,8 @@ def get_available_sources() -> List[str]:
 def conduct_research(
     query: str,
     selected_data_sources: Set[str],
-    uploaded_pdf_files: Optional[List[Union[io.BytesIO, Any]]] = None,
-    pdf_types: Optional[Dict[str, str]] = None,
     max_pubmed_articles: int = 3,
     on_progress_update: Optional[Callable[[str], None]] = None,
-    pdf_vector_store: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Conducts research based on a query and selected data sources.
@@ -85,47 +81,7 @@ def conduct_research(
     _progress(f"Query: {query}")
     _progress(f"Selected data sources: {', '.join(selected_data_sources)}")
 
-    # 1. Process PDF sources (special case)
-    if SOURCE_PDF in selected_data_sources and pdf_vector_store and pdf_vector_store.vector_store:
-        _progress(f"Searching indexed PDF chunks for query: '{query}'...")
-        source_data['pdf_sources'] = []
-        try:
-            relevant_pdf_chunks = pdf_vector_store.search_relevant_chunks(query, k=MAX_PDF_CHUNKS_TO_LLM)
-            if relevant_pdf_chunks:
-                _progress(f"Found {len(relevant_pdf_chunks)} relevant chunks from indexed PDFs.")
-                
-                # Filter chunks by PDF type if types are specified
-                filtered_chunks = relevant_pdf_chunks
-                if pdf_types and not uploaded_pdf_files:
-                    selected_types = set(pdf_types.values()) if isinstance(pdf_types, dict) else set()
-                    if selected_types:
-                        filtered_chunks = []
-                        for chunk_doc in relevant_pdf_chunks:
-                            chunk_type = chunk_doc.metadata.get('pdf_type', 'Unknown')
-                            if chunk_type in selected_types:
-                                filtered_chunks.append(chunk_doc)
-                        _progress(f"Filtered to {len(filtered_chunks)} chunks from selected types: {', '.join(selected_types)}")
-                
-                for chunk_doc in filtered_chunks:
-                    pdf_type = chunk_doc.metadata.get('pdf_type', 'Unknown')
-                    source_data['pdf_sources'].append({
-                        'title': f"PDF: {chunk_doc.metadata.get('source', 'N/A')} (Type: {pdf_type}, Chunk {chunk_doc.metadata.get('chunk_number', 'N/A')})",
-                        'content': chunk_doc.page_content,
-                        'source': chunk_doc.metadata.get('source', 'N/A'),
-                        'chunk_number': chunk_doc.metadata.get('chunk_number', 'N/A'),
-                        'pdf_type': pdf_type,
-                        'page_number': chunk_doc.metadata.get('page_number', 'N/A')
-                    })
-            else:
-                _progress("No relevant chunks found in indexed PDFs for the query.")
-        except Exception as e_pdf_search:
-            err_msg = f"Error searching PDF vector store: {e_pdf_search}"
-            _progress(err_msg)
-            processing_errors.append(err_msg)
-    elif SOURCE_PDF in selected_data_sources and not uploaded_pdf_files and not pdf_vector_store:
-        _progress("PDF source selected, but no PDF files were uploaded or indexed.")
-
-    # 2. Process all other selected data sources dynamically
+    # Process all selected data sources dynamically
     for source_name, fetch_function in AVAILABLE_SOURCES.items():
         if source_name in selected_data_sources and fetch_function is not None:
             _progress(f"Fetching data from {source_name} for query: '{query}'...")

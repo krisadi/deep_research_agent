@@ -3,100 +3,64 @@ PDF Fetcher 2 - External API Integration
 Fetches indexed PDF data from external API endpoint 2
 """
 
-import requests
 import os
 from typing import List, Dict, Any
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+SOURCE_NAME = "pdf_fetcher_2"
 
-SOURCE_NAME = "Indexed PDFs - API 2"
-
-def fetch_pdf_data_2(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+def fetch_pdfs(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """
-    Fetch indexed PDF data from external API endpoint 2
-    
-    Args:
-        query (str): The search query
-        max_results (int): Maximum number of results to return
-        
-    Returns:
-        List[Dict[str, Any]]: List of PDF documents with metadata
+    Fetch PDF documents from external API (currently returns dummy data).
     """
-    # Get API configuration from environment variables
-    api_endpoint = os.getenv("PDF_API_2_ENDPOINT")
-    api_key = os.getenv("PDF_API_2_KEY")
-    
-    if not api_endpoint:
-        print(f"Warning: PDF_API_2_ENDPOINT not configured for {SOURCE_NAME}")
+    # Check if this source is enabled
+    if not _get_boolean_env_var('ENABLE_PDF_FETCHER_2'):
         return []
     
-    try:
-        # Prepare the API request
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}" if api_key else ""
+    # Return dummy data for testing
+    dummy_results = [
+        {
+            'title': f'Academic Paper: {query}',
+            'url': 'https://example.com/academic-paper.pdf',
+            'content': f'This dummy academic paper presents research findings on "{query}". It includes abstract, introduction, methodology, results, discussion, and conclusion sections. The paper follows standard academic formatting and citation practices.',
+            'source': SOURCE_NAME
+        },
+        {
+            'title': f'Industry Report: {query} Market Analysis',
+            'url': 'https://example.com/industry-report.pdf',
+            'content': f'An industry report analyzing the market trends and opportunities related to "{query}". This document provides market size estimates, growth projections, competitive landscape analysis, and strategic recommendations for stakeholders.',
+            'source': SOURCE_NAME
+        },
+        {
+            'title': f'White Paper: {query} Implementation Guide',
+            'url': 'https://example.com/white-paper.pdf',
+            'content': f'A comprehensive white paper providing implementation guidance for "{query}". This document covers best practices, step-by-step procedures, case studies, and troubleshooting tips for successful deployment.',
+            'source': SOURCE_NAME
+        },
+        {
+            'title': f'Case Study: {query} Success Story',
+            'url': 'https://example.com/case-study.pdf',
+            'content': f'This case study documents a successful implementation of "{query}" in a real-world scenario. It details the challenges faced, solutions implemented, results achieved, and lessons learned for future projects.',
+            'source': SOURCE_NAME
         }
-        
-        payload = {
-            "query": query,
-            "max_results": max_results,
-            "include_content": True
-        }
-        
-        # Make the API call
-        response = requests.post(
-            api_endpoint,
-            json=payload,
-            headers=headers,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Standardize the response format
-            standardized_results = []
-            for item in data.get("results", []):
-                standardized_results.append({
-                    'title': item.get('title', 'No title'),
-                    'content': item.get('content', item.get('text', 'No content available')),
-                    'url': item.get('url', item.get('source_url', '')),
-                    'metadata': {
-                        'source': 'PDF_API_2',
-                        'pdf_id': item.get('id', ''),
-                        'file_name': item.get('file_name', ''),
-                        'page_number': item.get('page_number', ''),
-                        'confidence_score': item.get('confidence_score', ''),
-                        'extracted_date': item.get('extracted_date', '')
-                    }
-                })
-            
-            print(f"Fetched {len(standardized_results)} results from {SOURCE_NAME}")
-            return standardized_results
-            
-        else:
-            print(f"Error fetching from {SOURCE_NAME}: HTTP {response.status_code}")
-            return []
-            
-    except requests.exceptions.RequestException as e:
-        print(f"Request error fetching from {SOURCE_NAME}: {e}")
-        return []
-    except Exception as e:
-        print(f"Unexpected error fetching from {SOURCE_NAME}: {e}")
-        return []
+    ]
+    
+    # Limit to max_results
+    return dummy_results[:max_results]
+
+def _get_boolean_env_var(var_name: str) -> bool:
+    """Helper function to get boolean environment variables."""
+    return os.getenv(var_name, 'false').lower() in ('true', '1', 'yes', 'on')
 
 if __name__ == '__main__':
     # Test the fetcher
     test_query = "artificial intelligence research"
     print(f"Testing {SOURCE_NAME} with query: '{test_query}'")
     
-    results = fetch_pdf_data_2(test_query, max_results=3)
+    results = fetch_pdfs(test_query, max_results=3)
     
     for i, result in enumerate(results):
         print(f"\n--- Result {i+1} ---")
         print(f"Title: {result.get('title')}")
         print(f"Content: {result.get('content', '')[:200]}...")
         print(f"URL: {result.get('url')}")
-        print(f"Metadata: {result.get('metadata')}") 
+        print(f"Source: {result.get('source')}") 
