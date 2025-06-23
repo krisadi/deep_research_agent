@@ -5,6 +5,7 @@ PyPDF2
 BioPython
 # Web Search & Content
 duckduckgo-search
+requests
 # PDF OCR & Processing (OCR REMOVED)
 # pytesseract # REMOVED
 # Pillow # REMOVED
@@ -20,6 +21,10 @@ streamlit-extras
 python-docx
 
 # Environment variable management
-python-dotenv 
+python-dotenv
 
 # pdfplumber # Retaining as a comment from previous version, not actively used.
+
+streamlit-option-menu
+streamlit-lottie
+streamlit_js_eval

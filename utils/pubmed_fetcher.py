@@ -1,6 +1,8 @@
 from Bio import Entrez, Medline
 import os
 
+SOURCE_NAME = "PubMed Articles"
+
 # Always provide your email to NCBI
 Entrez.email = os.getenv("NCBI_EMAIL", "your_email@example.com") # Set a default or use an env var
 
@@ -26,7 +28,7 @@ def search_pubmed(query, max_results=10):
         handle = Entrez.esearch(db="pubmed", term=query, retmax=str(max_results), sort="relevance")
         record = Entrez.read(handle)
         handle.close()
-        return record.get("IdList", [])
+        return record.get("IdList", []) # type: ignore
     except Exception as e:
         print(f"Error searching PubMed for query '{query}': {e}")
         return []
@@ -98,12 +100,22 @@ def fetch_articles_for_query(query, max_articles=5):
     
     articles_data = fetch_article_details_batch(pmids)
     
-    # The number of results from fetch_article_details_batch might be less than len(pmids)
-    # if some IDs were invalid or data was missing.
-    # max_articles is already handled by search_pubmed's retmax and the batch fetch.
+    # Standardize the output to match the format expected by the research agent
+    standardized_results = []
+    for article in articles_data:
+        standardized_results.append({
+            'title': article.get('title', 'N/A'),
+            'content': article.get('abstract', 'No abstract available.'),
+            'url': f"https://pubmed.ncbi.nlm.nih.gov/{article.get('pmid', '')}/",
+            'metadata': {
+                'pmid': article.get('pmid', ''),
+                'authors': article.get('authors', []),
+                'journal': article.get('journal', 'N/A')
+            }
+        })
     
-    print(f"Fetched {len(articles_data)} article details for query: '{query}'")
-    return articles_data
+    print(f"Fetched and standardized {len(standardized_results)} article details for query: '{query}'")
+    return standardized_results
 
 if __name__ == '__main__':
     # Simple test

@@ -2,6 +2,8 @@
 from duckduckgo_search import DDGS
 from typing import List, Dict, Optional
 
+SOURCE_NAME = "DuckDuckGo Search"
+
 def search_duckduckgo(query: str, num_results: int = 5, region: str = 'wt-wt') -> List[Dict[str, str]]:
     """
     Performs a DuckDuckGo search and returns formatted results.

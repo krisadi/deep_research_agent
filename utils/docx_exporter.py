@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 
-def create_research_report_docx(query, results, is_raw_data=False):
+def create_research_report_docx(query, results, is_raw_data=False, source_data=None):
     """
     Create a Word document from research results
     
@@ -19,6 +19,7 @@ def create_research_report_docx(query, results, is_raw_data=False):
         query: The research query
         results: The research results (HTML formatted)
         is_raw_data: Whether this is raw data mode or AI synthesis mode
+        source_data: Source data dictionary (required for raw mode)
     
     Returns:
         Document: The Word document object
@@ -49,6 +50,31 @@ def create_research_report_docx(query, results, is_raw_data=False):
     
     # Parse the HTML results and convert to Word document
     parse_html_to_docx(doc, results)
+    
+    # For raw data mode, add the source data
+    if is_raw_data and source_data:
+        doc.add_paragraph()  # Spacing
+        doc.add_paragraph("Raw Source Data:", style='Heading 2')
+        
+        total_sources = sum(len(sources) for sources in source_data.values())
+        doc.add_paragraph(f"Total Sources: {total_sources}")
+        
+        for source_type, sources in source_data.items():
+            if sources:
+                source_type_name = source_type.replace('_sources', '').replace('_', ' ').title()
+                doc.add_paragraph(f"{source_type_name}:", style='Heading 3')
+                
+                for i, source in enumerate(sources):
+                    doc.add_paragraph(f"Source {i+1}:", style='Heading 4')
+                    doc.add_paragraph(f"Title: {source.get('title', 'N/A')}")
+                    
+                    url = source.get('url', '')
+                    if url:
+                        doc.add_paragraph(f"URL: {url}")
+                    
+                    content = source.get('content', 'No content available.')
+                    doc.add_paragraph(f"Content: {content}")
+                    doc.add_paragraph()  # Spacing
     
     return doc
 

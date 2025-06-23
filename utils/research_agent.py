@@ -2,34 +2,73 @@
 from . import pubmed_fetcher
 from . import llm_handler
 from . import duckduckgo_searcher
+from . import arxiv_fetcher
+from . import wikipedia_fetcher
+from . import pdf_fetcher_1
+from . import pdf_fetcher_2
+from . import pdf_fetcher_3
 from .vector_store_handler import VectorStoreHandler
 
 from typing import List, Dict, Optional, Callable, Any, Set, Union
 import io
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configuration
-MAX_CONTEXT_CHARS_FOR_LLM = 32000 # Increased slightly, adjust based on model (e.g., gpt-3.5-turbo-16k)
+MAX_CONTEXT_CHARS_FOR_LLM = 32000
 MAX_DUCKDUCKGO_RESULTS = 3
-MAX_PDF_CHUNKS_TO_LLM = 5 # Max relevant PDF chunks to feed to LLM from vector search
+MAX_PDF_CHUNKS_TO_LLM = 5
 
-# Data source constants
-SOURCE_PDF = "Indexed PDFs"
-SOURCE_PUBMED = "PubMed Articles"
-SOURCE_DUCKDUGO = "DuckDuckGo Search"
+# Data source constants - will be populated dynamically
+AVAILABLE_SOURCES: Dict[str, Optional[Callable[..., Any]]] = {}
+SOURCE_PDF = "Indexed PDFs" # This remains static as it's a special case
 
+def _get_boolean_env_var(var_name: str) -> bool:
+    """Helper to get boolean value from environment variable."""
+    return os.getenv(var_name, 'false').lower() in ('true', '1', 't')
+
+def _initialize_sources():
+    """Dynamically initializes the available data sources based on .env configuration."""
+    global AVAILABLE_SOURCES
+    AVAILABLE_SOURCES = {SOURCE_PDF: None} # Start with PDF source
+
+    if _get_boolean_env_var('ENABLE_WIKIPEDIA_SEARCH'):
+        AVAILABLE_SOURCES[wikipedia_fetcher.SOURCE_NAME] = wikipedia_fetcher.fetch_wikipedia_data
+    if _get_boolean_env_var('ENABLE_DUCKDUCKGO_SEARCH'):
+        AVAILABLE_SOURCES[duckduckgo_searcher.SOURCE_NAME] = duckduckgo_searcher.search_duckduckgo
+    if _get_boolean_env_var('ENABLE_ARXIV_SEARCH'):
+        AVAILABLE_SOURCES[arxiv_fetcher.SOURCE_NAME] = arxiv_fetcher.fetch_arxiv_data
+    if _get_boolean_env_var('ENABLE_PUBMED_SEARCH'):
+        AVAILABLE_SOURCES[pubmed_fetcher.SOURCE_NAME] = pubmed_fetcher.fetch_articles_for_query
+    if _get_boolean_env_var('ENABLE_PDF_API_1'):
+        AVAILABLE_SOURCES[pdf_fetcher_1.SOURCE_NAME] = pdf_fetcher_1.fetch_pdf_data_1
+    if _get_boolean_env_var('ENABLE_PDF_API_2'):
+        AVAILABLE_SOURCES[pdf_fetcher_2.SOURCE_NAME] = pdf_fetcher_2.fetch_pdf_data_2
+    if _get_boolean_env_var('ENABLE_PDF_API_3'):
+        AVAILABLE_SOURCES[pdf_fetcher_3.SOURCE_NAME] = pdf_fetcher_3.fetch_pdf_data_3
+    # Add other fetchers here in the same pattern
+
+_initialize_sources()
+
+def get_available_sources() -> List[str]:
+    """Returns the list of available source names."""
+    return list(AVAILABLE_SOURCES.keys())
 
 def conduct_research(
     query: str,
     selected_data_sources: Set[str],
-    uploaded_pdf_files: Optional[List[Union[io.BytesIO, Any]]] = None, # Streamlit UploadedFile is IO-like
-    pdf_types: Optional[Dict[str, str]] = None,  # NEW: PDF type mapping
+    uploaded_pdf_files: Optional[List[Union[io.BytesIO, Any]]] = None,
+    pdf_types: Optional[Dict[str, str]] = None,
     max_pubmed_articles: int = 3,
     on_progress_update: Optional[Callable[[str], None]] = None,
-    pdf_vector_store: Optional[Any] = None,  # Pre-indexed vector store
+    pdf_vector_store: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Conducts research based on a query, selected data sources, optional PDFs, and PubMed articles.
-    Returns a dictionary with results and structured source data.
+    Conducts research based on a query and selected data sources.
+    Implements multi-stage LLM processing for balanced source analysis.
     """
     
     def _progress(message: str):
@@ -37,24 +76,19 @@ def conduct_research(
             on_progress_update(message)
         print(message)
 
-    full_text_corpus: List[str] = []
-    sources_summary: List[str] = []
-    processing_errors: List[str] = []
+    # Initialize data structures dynamically
+    source_data: Dict[str, List[Dict[str, Any]]] = {}
     
-    # Structured data for individual sources
-    source_data = {
-        'pdf_sources': [],
-        'pubmed_sources': [],
-        'web_sources': []
-    }
+    processing_errors: List[str] = []
 
     _progress("Starting research process...")
     _progress(f"Query: {query}")
     _progress(f"Selected data sources: {', '.join(selected_data_sources)}")
 
-    # 1. Retrieve relevant chunks from Indexed PDFs
+    # 1. Process PDF sources (special case)
     if SOURCE_PDF in selected_data_sources and pdf_vector_store and pdf_vector_store.vector_store:
         _progress(f"Searching indexed PDF chunks for query: '{query}'...")
+        source_data['pdf_sources'] = []
         try:
             relevant_pdf_chunks = pdf_vector_store.search_relevant_chunks(query, k=MAX_PDF_CHUNKS_TO_LLM)
             if relevant_pdf_chunks:
@@ -63,7 +97,6 @@ def conduct_research(
                 # Filter chunks by PDF type if types are specified
                 filtered_chunks = relevant_pdf_chunks
                 if pdf_types and not uploaded_pdf_files:
-                    # We're using pre-indexed vector store, filter by type from metadata
                     selected_types = set(pdf_types.values()) if isinstance(pdf_types, dict) else set()
                     if selected_types:
                         filtered_chunks = []
@@ -75,13 +108,6 @@ def conduct_research(
                 
                 for chunk_doc in filtered_chunks:
                     pdf_type = chunk_doc.metadata.get('pdf_type', 'Unknown')
-                    chunk_text = f"--- START OF RELEVANT PDF CHUNK (Source: {chunk_doc.metadata.get('source', 'N/A')}, Type: {pdf_type}, Chunk: {chunk_doc.metadata.get('chunk_number', 'N/A')}) ---\n"
-                    chunk_text += chunk_doc.page_content
-                    chunk_text += f"\n--- END OF RELEVANT PDF CHUNK (Source: {chunk_doc.metadata.get('source', 'N/A')}) ---"
-                    full_text_corpus.append(chunk_text)
-                    sources_summary.append(f"Retrieved Chunk from PDF: {chunk_doc.metadata.get('source', 'N/A')} (Type: {pdf_type}, Chunk {chunk_doc.metadata.get('chunk_number', 'N/A')})")
-                    
-                    # Store source data for filtering
                     source_data['pdf_sources'].append({
                         'title': f"PDF: {chunk_doc.metadata.get('source', 'N/A')} (Type: {pdf_type}, Chunk {chunk_doc.metadata.get('chunk_number', 'N/A')})",
                         'content': chunk_doc.page_content,
@@ -99,106 +125,259 @@ def conduct_research(
     elif SOURCE_PDF in selected_data_sources and not uploaded_pdf_files and not pdf_vector_store:
         _progress("PDF source selected, but no PDF files were uploaded or indexed.")
 
-    # 2. Fetch articles from PubMed
-    if SOURCE_PUBMED in selected_data_sources:
-        import os # For getenv
-        ncbi_email = os.getenv("NCBI_EMAIL")
-        if not ncbi_email or ncbi_email == "your_email@example.com":
-            warn_msg = "NCBI_EMAIL environment variable is not set or uses a placeholder. PubMed search functionality might be limited or unreliable. Please configure it for optimal results."
-            _progress(f"Warning: {warn_msg}")
-            processing_errors.append(warn_msg)
-            # Continue with the search, pubmed_fetcher has its own console warning.
+    # 2. Process all other selected data sources dynamically
+    for source_name, fetch_function in AVAILABLE_SOURCES.items():
+        if source_name in selected_data_sources and fetch_function is not None:
+            _progress(f"Fetching data from {source_name} for query: '{query}'...")
+            if not query:
+                _progress(f"Skipping {source_name} search as query is empty.")
+                continue
+            
+            try:
+                # Note: This part needs to be standardized. Assuming fetchers return a list of dicts.
+                # This is a simplification and might need adjustment based on actual fetcher signatures.
+                if source_name == pubmed_fetcher.SOURCE_NAME:
+                     # Special handling for PubMed fetcher if its signature is different
+                    results = fetch_function(query, max_articles=max_pubmed_articles)
+                elif source_name == duckduckgo_searcher.SOURCE_NAME:
+                    results = fetch_function(query, num_results=MAX_DUCKDUCKGO_RESULTS)
+                else:
+                    results = fetch_function(query, max_results=10) # A default for others
 
-        _progress(f"Fetching up to {max_pubmed_articles} PubMed articles for query: '{query}'...")
-        if not query:
-            _progress("Skipping PubMed search as query is empty (though source was selected).")
-        else:
-            pubmed_articles = pubmed_fetcher.fetch_articles_for_query(query, max_articles=max_pubmed_articles)
-            if pubmed_articles:
-                _progress(f"Found {len(pubmed_articles)} PubMed articles.")
-                for article in pubmed_articles:
-                    pmid = article.get('pmid', 'N/A')
-                    title = article.get('title', 'N/A')
-                    abstract = article.get('abstract', 'N/A')
-                    if abstract and abstract != 'N/A':
-                        article_text = f"--- START OF PUBMED ARTICLE (PMID: {pmid}) ---\n"
-                        article_text += f"Title: {title}\nAbstract: {abstract}\n"
-                        article_text += f"--- END OF PUBMED ARTICLE (PMID: {pmid}) ---"
-                        full_text_corpus.append(article_text)
-                        sources_summary.append(f"PubMed Article (PMID: {pmid}): {title}")
+                if not results:
+                    _progress(f"No results found from {source_name}.")
+                    continue
+
+                _progress(f"Found {len(results)} results from {source_name}.")
+                
+                # Determine the key for the source_data dictionary
+                if source_name == duckduckgo_searcher.SOURCE_NAME:
+                    source_key = 'web_sources'
+                else:
+                    # Generic key generation for other sources
+                    source_key = source_name.lower().replace(' ', '_').replace('articles', '').replace('papers', '').strip().replace('__', '_') + '_sources'
+                
+                if source_key not in source_data:
+                    source_data[source_key] = []
+
+                # Standardize and append results
+                for item in results:
+                    # Handle variations in return formats (e.g. arxiv vs duckduckgo)
+                    if isinstance(item, dict):
+                        title = item.get('title', 'No title')
+                        content = item.get('content', item.get('snippet', 'No content available'))
+                        url = item.get('url', item.get('href', ''))
+                        metadata = item.get('metadata', {})
                         
-                        # Store source data for filtering
-                        source_data['pubmed_sources'].append({
-                            'title': f"PubMed: {title}",
-                            'content': f"Title: {title}\nAbstract: {abstract}",
-                            'pmid': pmid,
-                            'url': f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                        source_data[source_key].append({
+                            'title': title,
+                            'content': content,
+                            'url': url,
+                            'metadata': metadata
                         })
-                        
-                        _progress(f"Added PubMed article to corpus: PMID {pmid} - {title[:50]}...")
                     else:
-                        _progress(f"Skipping PubMed article PMID {pmid} due to missing abstract: {title[:50]}...")
-            else:
-                _progress("No relevant articles found on PubMed for the query.")
-    
-    # 3. Fetch search results from DuckDuckGo
-    if SOURCE_DUCKDUGO in selected_data_sources:
-        _progress(f"Fetching up to {MAX_DUCKDUCKGO_RESULTS} DuckDuckGo search results for query: '{query}'...")
-        if not query:
-            _progress("Skipping DuckDuckGo search as query is empty (though source was selected).")
-        else:
-            ddg_results = duckduckgo_searcher.search_duckduckgo(query, num_results=MAX_DUCKDUCKGO_RESULTS)
-            if ddg_results:
-                _progress(f"Found {len(ddg_results)} DuckDuckGo search results.")
-                for result in ddg_results:
-                    title = result.get('title', 'N/A')
-                    snippet = result.get('snippet', 'N/A')
-                    url = result.get('url', '#')
-                    if snippet and snippet != 'N/A':
-                        search_text = f"--- START OF DUCKDUCKGO SEARCH RESULT SNIPPET ---\n"
-                        search_text += f"Title: {title}\nURL: {url}\nSnippet: {snippet}\n"
-                        search_text += f"--- END OF DUCKDUCKGO SEARCH RESULT SNIPPET ---"
-                        full_text_corpus.append(search_text)
-                        sources_summary.append(f"DuckDuckGo Snippet: {title} ({url})")
-                        
-                        # Store source data for filtering
-                        source_data['web_sources'].append({
-                            'title': f"Web: {title}",
-                            'content': f"Title: {title}\nURL: {url}\nSnippet: {snippet}",
-                            'url': url
-                        })
-                        
-                        _progress(f"Added DuckDuckGo snippet to corpus: {title[:50]}...")
-                    else:
-                         _progress(f"Skipping DuckDuckGo result due to missing snippet: {title[:50]}...")
-            else:
-                _progress("No relevant search results found on DuckDuckGo for the query.")
+                        _progress(f"Warning: Skipping non-dict item from {source_name}: {item}")
 
-    # Check if any information was gathered
-    if not full_text_corpus:
-        _progress("No text content gathered from any selected and successful sources.")
-        final_report_msg = "No information was gathered from the selected sources for your query. "
-        final_report_msg += "Please try a different query, upload relevant documents if using PDF source, or check source selection."
-        if processing_errors:
-            final_report_msg += "\n\nProcessing Issues Encountered:\n" + "\n".join(processing_errors)
-        return {
-            'report': final_report_msg,
-            'source_data': source_data,
-            'is_raw_data': True
-        }
+            except Exception as e:
+                error_msg = f"Exception fetching from {source_name}: {str(e)}"
+                _progress(error_msg)
+                processing_errors.append(error_msg)
 
-    _progress(f"Aggregated text from {len(sources_summary)} distinct source entries.")
+    # Pass the gathered data to the synthesis helper function
+    return _perform_synthesis(query, source_data, processing_errors, _progress)
+
+def _summarize_individual_sources(query: str, source_data: Dict[str, List], progress_callback) -> Dict[str, str]:
+    """
+    Stage 1: Summarize each source individually to prevent dominance.
+    """
+    source_summaries = {}
     
-    # Check if LLM is available before processing
-    _progress("Checking LLM availability...")
-    llm_test_response = llm_handler.get_llm_response("Test", "You are a helpful assistant.")
-    llm_available = not (llm_test_response.startswith("Error:") or "Azure OpenAI" in llm_test_response or "Language Model" in llm_test_response)
-    
-    if not llm_available:
-        _progress("LLM is not available. Displaying raw data from each source separately.")
+    # Process each source type
+    for source_type, sources in source_data.items():
+        if not sources:
+            continue
+            
+        source_type_name = source_type.replace('_sources', '').replace('_', ' ').title()
+        progress_callback(f"Summarizing {len(sources)} {source_type_name} sources...")
         
-        # Create a simplified report with just the raw data
-        final_report = f"""
+        # Combine all sources of this type
+        combined_content = ""
+        for i, source in enumerate(sources):
+            combined_content += f"\n--- {source_type_name} Source {i+1} ---\n"
+            combined_content += f"Title: {source.get('title', 'No title')}\n"
+            combined_content += f"Content: {source.get('content', 'No content')}\n"
+            if source.get('url'):
+                combined_content += f"URL: {source.get('url')}\n"
+            combined_content += "---\n"
+        
+        # Create summarization prompt
+        summary_prompt = f"""
+You are an expert research assistant. Your task is to summarize the key information from the following {source_type_name} sources related to this query:
+
+Query: "{query}"
+
+{source_type_name} Sources:
+{combined_content}
+
+Instructions:
+1. Focus on information directly relevant to the query
+2. Extract key facts, findings, and insights
+3. Maintain objectivity and accuracy
+4. Highlight any conflicting information within these sources
+5. Keep the summary concise but comprehensive (aim for 200-400 words)
+6. Note the type and reliability of the source material
+
+Provide a clear, structured summary:
+"""
+        
+        # Get summary from LLM
+        try:
+            summary_response = llm_handler.get_llm_response(summary_prompt)
+            if not summary_response.startswith("Error:"):
+                source_summaries[source_type] = summary_response
+                progress_callback(f"✓ Completed summary for {source_type_name}")
+            else:
+                progress_callback(f"✗ Failed to summarize {source_type_name}: {summary_response}")
+                source_summaries[source_type] = f"Error summarizing {source_type_name} sources."
+        except Exception as e:
+            progress_callback(f"✗ Exception summarizing {source_type_name}: {str(e)}")
+            source_summaries[source_type] = f"Error summarizing {source_type_name} sources."
+    
+    return source_summaries
+
+def _create_final_synthesis(query: str, source_summaries: Dict[str, str], progress_callback) -> str:
+    """
+    Stage 2: Create final synthesis from individual source summaries.
+    """
+    if not source_summaries:
+        return "No source summaries available for synthesis."
+    
+    # Combine all source summaries
+    combined_summaries = ""
+    for source_type, summary in source_summaries.items():
+        source_type_name = source_type.replace('_sources', '').replace('_', ' ').title()
+        combined_summaries += f"\n--- {source_type_name} Summary ---\n{summary}\n---\n"
+    
+    # Create synthesis prompt
+    synthesis_prompt = f"""
+You are an expert research analyst. Your task is to create a comprehensive, balanced synthesis from the following source summaries to answer the user's query.
+
+User's Query: "{query}"
+
+Source Summaries:
+{combined_summaries}
+
+Instructions:
+1. Create a balanced, comprehensive answer that draws from ALL source types equally
+2. Ensure no single source type dominates the final conclusion
+3. Identify areas of agreement and disagreement across sources
+4. Highlight the strengths and limitations of different source types
+5. Provide a well-structured, analytical response
+6. Use clear headings and bullet points where appropriate
+7. Acknowledge any gaps in the available information
+8. Maintain objectivity and avoid bias toward any particular source type
+
+Structure your response with:
+- Executive Summary
+- Key Findings (organized by theme)
+- Source Analysis (strengths/limitations of each source type)
+- Conclusions and Recommendations
+- Areas for Further Research
+
+Begin your synthesis:
+"""
+    
+    progress_callback("Creating final synthesis from source summaries...")
+    
+    try:
+        synthesis_response = llm_handler.get_llm_response(synthesis_prompt)
+        if not synthesis_response.startswith("Error:"):
+            progress_callback("✓ Final synthesis completed")
+            return synthesis_response
+        else:
+            progress_callback(f"✗ Failed to create final synthesis: {synthesis_response}")
+            return f"Error creating final synthesis: {synthesis_response}"
+    except Exception as e:
+        progress_callback(f"✗ Exception in final synthesis: {str(e)}")
+        return f"Error creating final synthesis: {str(e)}"
+
+def _create_final_report(query: str, final_synthesis: str, source_data: Dict[str, List], 
+                        source_summaries: Dict[str, str], processing_errors: List[str]) -> str:
+    """
+    Create the final HTML report with multi-stage processing results.
+    """
+    # Count total sources
+    total_sources = sum(len(sources) for sources in source_data.values())
+    
+    report = f"""
+<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+<h1 style="color: #2c3e50; border-bottom: 3px solid #667eea; padding-bottom: 10px;">AI Research Report: "{query}"</h1>
+
+<div style="background: #e8f5e8; border: 1px solid #c8e6c9; border-radius: 8px; padding: 15px; margin: 20px 0;">
+<strong>🤖 Multi-Stage AI Synthesis:</strong> This report uses a two-stage AI process: individual source summarization followed by balanced synthesis to ensure no single source dominates the results.
+</div>
+"""
+    
+    # Source statistics
+    if total_sources > 0:
+        report += f"""
+<h2 style="color: #34495e; margin-top: 30px;">📊 Sources Analyzed</h2>
+<div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 15px 0;">
+<div style="font-weight: bold; margin-bottom: 10px;">Total Sources: {total_sources}</div>
+"""
+        for source_type, sources in source_data.items():
+            if sources:
+                source_type_name = source_type.replace('_sources', '').replace('_', ' ').title()
+                report += f"<div style='margin: 5px 0;'>• {source_type_name}: {len(sources)} sources</div>"
+        report += "</div>"
+    
+    # Individual source summaries
+    if source_summaries:
+        report += """
+<h2 style="color: #34495e; margin-top: 30px;">📝 Individual Source Summaries</h2>
+<div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 15px 0;">
+"""
+        for source_type, summary in source_summaries.items():
+            source_type_name = source_type.replace('_sources', '').replace('_', ' ').title()
+            report += f"""
+<div style="margin: 20px 0; padding: 15px; background: white; border-radius: 5px; border-left: 4px solid #667eea;">
+<h3 style="color: #2c3e50; margin-top: 0;">{source_type_name}</h3>
+<div style="line-height: 1.6;">{summary}</div>
+</div>
+"""
+        report += "</div>"
+    
+    # Processing errors
+    if processing_errors:
+        report += """
+<h2 style="color: #e74c3c; margin-top: 30px;">⚠️ Processing Issues</h2>
+<div style="background: #fdf2f2; border-left: 4px solid #e74c3c; padding: 15px; margin: 15px 0;">
+"""
+        for err in processing_errors:
+            report += f"<div style='margin: 8px 0; color: #c0392b;'>• {err}</div>"
+        report += "</div>"
+    
+    # Final synthesis
+    report += """
+<hr style="margin: 30px 0; border: none; border-top: 2px solid #e1e8ed;">
+<h2 style="color: #2c3e50; margin-top: 30px;">💡 Final AI Synthesis</h2>
+<div style="background: white; border: 1px solid #e1e8ed; border-radius: 8px; padding: 25px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.6; font-size: 1.1em;">
+"""
+    report += final_synthesis
+    report += """
+</div>
+</div>
+"""
+    
+    return report
+
+def _create_raw_data_report(query: str, source_data: Dict[str, List], processing_errors: List[str]) -> Dict[str, Any]:
+    """
+    Create a report when LLM is not available.
+    """
+    total_sources = sum(len(sources) for sources in source_data.values())
+    
+    report = f"""
 <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
 <h1 style="color: #2c3e50; border-bottom: 3px solid #667eea; padding-bottom: 10px;">Research Report: "{query}"</h1>
 
@@ -206,119 +385,95 @@ def conduct_research(
 <strong>ℹ️ Note:</strong> LLM processing is not available. Use the Source Management section below to view individual source excerpts and regenerate insights.
 </div>
 """
-        
-        if processing_errors:
-            final_report += """
-<h2 style="color: #e74c3c; margin-top: 30px;">⚠️ Processing Issues</h2>
-<div style="background: #fdf2f2; border-left: 4px solid #e74c3c; padding: 15px; margin: 15px 0;">
-"""
-            for err in processing_errors:
-                final_report += f"<div style='margin: 8px 0; color: #c0392b;'>• {err}</div>"
-            final_report += "</div>"
-        
-        final_report += f"""
-<hr style="margin: 30px 0; border: none; border-top: 2px solid #e1e8ed;">
-<div style="background: #e8f5e8; border: 1px solid #c8e6c9; border-radius: 8px; padding: 15px; margin: 20px 0;">
-    <strong>📊 Summary:</strong> {len(sources_summary)} sources were processed. Use the Source Management section below to view individual excerpts and regenerate insights from selected sources.
-</div>
-</div>
-"""
-        
-        _progress("Research process completed (raw data mode).")
-        return {
-            'report': final_report,
-            'source_data': source_data,
-            'is_raw_data': True
-        }
-    
-    # LLM is available - proceed with normal processing
-    _progress("LLM is available. Proceeding with synthesis...")
-    combined_text = "\n\n".join(full_text_corpus)
-
-    if len(combined_text) > MAX_CONTEXT_CHARS_FOR_LLM:
-        _progress(f"Warning: Combined text length ({len(combined_text)} chars) exceeds limit ({MAX_CONTEXT_CHARS_FOR_LLM} chars). Truncating context.")
-        combined_text = combined_text[:MAX_CONTEXT_CHARS_FOR_LLM]
-
-    _progress("Formulating prompt for LLM...")
-    llm_prompt = f"""
-You are a highly proficient AI research assistant. Your task is to synthesize information from the provided documents to answer the user's research query.
-
-User's Research Query: "{query}"
-
-Provided Documents (these may include PubMed abstracts, web search snippets, and relevant chunks from PDF documents with type classifications):
-{combined_text}
-
-Instructions:
-1. Carefully read all provided document excerpts.
-2. Based *only* on the information within these documents, provide a comprehensive answer to the user's research query.
-3. Structure your answer clearly. Use bullet points or numbered lists for key findings if appropriate.
-4. If the documents contain conflicting information, acknowledge it if relevant to the query.
-5. If the documents do not contain sufficient information to answer the query thoroughly, explicitly state that and indicate what information might be missing. Do not invent information or search outside these provided texts.
-6. When possible, reference the source of key pieces of information by mentioning the document title, PDF source and type, PMID, or web search result title (e.g., "According to PDF 'report.pdf' (Type: Patient_Data) chunk...", "The abstract of PMID:123456 states...", "The DuckDuckGo snippet for 'XYZ' suggests...").
-7. Pay attention to PDF type classifications (e.g., Patient_Data, Social_Media_Data, Research_Paper, etc.) as they may indicate the nature and reliability of the information source.
-8. Your response should be objective and analytical.
-
-Begin your synthesized answer below:
-"""
-
-    _progress("Sending request to LLM. This may take a moment...")
-    llm_response = llm_handler.get_llm_response(llm_prompt)
-    
-    if "Error:" in llm_response and ("Azure OpenAI" in llm_response or "Language Model" in llm_response):
-        _progress(f"LLM interaction failed: {llm_response}")
-        return {
-            'report': f"Failed to get a response from the Language Model. Details: {llm_response}",
-            'source_data': source_data,
-            'is_raw_data': True
-        }
-
-    _progress("LLM response received.")
-
-    final_report = f"""
-<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-<h1 style="color: #2c3e50; border-bottom: 3px solid #667eea; padding-bottom: 10px;">AI Research Report: "{query}"</h1>
-
-<div style="background: #e8f5e8; border: 1px solid #c8e6c9; border-radius: 8px; padding: 15px; margin: 20px 0;">
-<strong>🤖 AI Synthesis:</strong> This report has been synthesized by an AI model from multiple information sources.
-</div>
-"""
-    
-    if sources_summary:
-        final_report += """
-<h2 style="color: #34495e; margin-top: 30px;">📚 Sources Consulted</h2>
-<div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 15px 0;">
-"""
-        for src in sources_summary:
-            final_report += f"<div style='margin: 8px 0;'>• {src}</div>"
-        final_report += "</div>"
-    else:
-        final_report += """
-<div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 15px; margin: 20px 0;">
-<strong>⚠️ Note:</strong> No primary information sources were successfully processed or found relevant.
-</div>
-"""
     
     if processing_errors:
-        final_report += """
+        report += """
 <h2 style="color: #e74c3c; margin-top: 30px;">⚠️ Processing Issues</h2>
 <div style="background: #fdf2f2; border-left: 4px solid #e74c3c; padding: 15px; margin: 15px 0;">
 """
         for err in processing_errors:
-            final_report += f"<div style='margin: 8px 0; color: #c0392b;'>• {err}</div>"
-        final_report += "</div>"
-        
-    final_report += """
+            report += f"<div style='margin: 8px 0; color: #c0392b;'>• {err}</div>"
+        report += "</div>"
+    
+    report += f"""
 <hr style="margin: 30px 0; border: none; border-top: 2px solid #e1e8ed;">
-<h2 style="color: #2c3e50; margin-top: 30px;">💡 AI-Synthesized Answer</h2>
-<div style="background: white; border: 1px solid #e1e8ed; border-radius: 8px; padding: 25px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.6; font-size: 1.1em;">
-"""
-    final_report += llm_response
-    final_report += """
+<div style="background: #e8f5e8; border: 1px solid #c8e6c9; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <strong>📊 Summary:</strong> {total_sources} sources were processed. Use the Source Management section below to view individual excerpts and regenerate insights from selected sources.
 </div>
 </div>
 """
     
-    _progress("Research process completed.")
+    return {
+        'report': report,
+        'source_data': source_data,
+        'is_raw_data': True
+    }
+
+def regenerate_report_from_sources(
+    query: str,
+    source_data: Dict[str, List[Dict[str, Any]]],
+    on_progress_update: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Regenerates a research report from a pre-existing, filtered set of source data.
+    """
+    def _progress(message: str):
+        if on_progress_update:
+            on_progress_update(message)
+        print(message)
+
+    _progress("Starting report regeneration from selected sources...")
+
+    # The synthesis logic is the same, so we can reuse it.
+    # We pass an empty list for processing_errors as we are not fetching new data.
+    return _perform_synthesis(query, source_data, [], _progress)
+
+
+def _perform_synthesis(
+    query: str, 
+    source_data: Dict[str, List[Dict[str, Any]]], 
+    processing_errors: List[str], 
+    progress_callback: Callable[[str], None]
+) -> Dict[str, Any]:
+    """
+    Private helper to perform the synthesis part of the research,
+    callable by both conduct_research and regenerate_report.
+    """
+    total_sources = sum(len(sources) for sources in source_data.values())
+    if total_sources == 0:
+        progress_callback("No text content available to synthesize.")
+        return {
+            'report': "No information was available to generate a report.",
+            'source_data': source_data,
+            'is_raw_data': True
+        }
+
+    progress_callback(f"Synthesizing information from {total_sources} distinct source entries.")
+
+    # Check if LLM is available before processing
+    progress_callback("Checking LLM availability...")
+    llm_test_response = llm_handler.get_llm_response("Test", "You are a helpful assistant.")
+    llm_available = not (llm_test_response.startswith("Error:") or "Azure OpenAI" in llm_test_response or "Language Model" in llm_test_response)
+    
+    if not llm_available:
+        progress_callback("LLM is not available. Displaying raw data from each source separately.")
+        return _create_raw_data_report(query, source_data, processing_errors)
+    
+    # LLM is available - proceed with multi-stage processing
+    progress_callback("LLM is available. Proceeding with multi-stage synthesis...")
+    
+    # Stage 1: Individual source summarization
+    progress_callback("Stage 1: Summarizing each source individually...")
+    source_summaries = _summarize_individual_sources(query, source_data, progress_callback)
+    
+    # Stage 2: Final synthesis from source summaries
+    progress_callback("Stage 2: Creating final synthesis from source summaries...")
+    final_synthesis = _create_final_synthesis(query, source_summaries, progress_callback)
+    
+    # Create final report
+    final_report = _create_final_report(query, final_synthesis, source_data, source_summaries, processing_errors)
+    
+    progress_callback("Synthesis process completed.")
     return {
         'report': final_report,
         'source_data': source_data,

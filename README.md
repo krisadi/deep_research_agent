@@ -1,23 +1,32 @@
 # Deep Q&A Research Agent
 
-This application is an advanced research assistant that answers user questions by synthesizing information from multiple sources. It leverages Large Language Models (LLMs) via Azure OpenAI for its core reasoning capabilities.
+This application is an advanced research assistant that answers user questions by synthesizing information from multiple sources. It leverages Large Language Models (LLMs) via Azure OpenAI for its core reasoning capabilities and implements a two-stage processing approach for balanced, comprehensive results.
 
 ## Features
 
 -   **Multi-Source Data Ingestion:**
     -   **PubMed Articles:** Fetches abstracts from PubMed.
     -   **DuckDuckGo Search:** Retrieves web search snippets.
+    -   **arXiv Papers:** Fetches academic papers from arXiv.org.
+    -   **News Articles:** Retrieves current news from various sources (requires News API key).
+    -   **Wikipedia Articles:** Fetches Wikipedia articles and summaries.
+    -   **Semantic Scholar Papers:** Retrieves academic papers with detailed metadata.
     -   **PDF Document Processing (Text-Based PDFs):**
         -   Extracts text directly from digital, text-based PDF documents. (OCR for image-based PDFs is NOT supported).
         -   Chunks processed PDF text.
         -   Indexes these chunks into an in-memory FAISS vector store using sentence embeddings (via Sentence Transformers).
         -   Retrieves relevant PDF chunks based on semantic similarity to the user's query.
+-   **Multi-Stage LLM Processing:**
+    -   **Stage 1:** Individual source summarization - Each data source type is summarized separately to prevent dominance.
+    -   **Stage 2:** Balanced synthesis - Final comprehensive answer is created from individual source summaries.
+    -   Ensures no single source type dominates the final conclusion.
 -   **Azure OpenAI Integration:** Uses an LLM (via Azure OpenAI) to synthesize information from all gathered sources and answer the user's research question.
 -   **Streamlit UI:**
     -   Allows users to input a research question.
-    -   Select data sources (PubMed, DuckDuckGo, Indexed PDFs).
+    -   Select data sources from multiple available options.
     -   Upload PDF files for indexing and searching.
     -   Displays a log of the research process and the final synthesized answer.
+    -   Source management interface for viewing individual sources and regenerating insights.
 -   **Modular Design:** Code is organized into utility modules for search, PDF indexing, vector store management, and LLM interaction.
 
 ## Setup
@@ -76,6 +85,11 @@ This project uses a `.env` file to manage environment variables. The application
     Set this for respectful use of the NCBI Entrez API.
     `NCBI_EMAIL="your_actual_email@example.com"` (replace with your actual email).
 
+*   **News API Key (Optional - for News Articles):**
+    For news article fetching, you can optionally set a News API key.
+    `NEWS_API_KEY="your_news_api_key"` (get from https://newsapi.org/)
+    Note: News fetching will show an error message if no API key is provided, but other sources will continue to work.
+
 *   **Specialized Model Settings (o3-mini):**
     *   The application automatically applies specialized settings if your `AZURE_OPENAI_DEPLOYMENT_NAME` (set in `.env`) includes "o3-mini". See `.env.example` for details.
 
@@ -100,7 +114,7 @@ The application now features a simple login page to control access.
 ### Performing Research
 Once logged in:
 1.  **Enter Research Question:** Type your question in the sidebar.
-2.  **Select Data Sources:** Choose from "PubMed Articles", "DuckDuckGo Search", and "Indexed PDFs".
+2.  **Select Data Sources:** Choose from "PubMed Articles", "DuckDuckGo Search", "arXiv Papers", "News Articles", "Wikipedia Articles", "Semantic Scholar Papers", and "Indexed PDFs".
 3.  **Upload PDFs (Optional):** If "Indexed PDFs" is selected, upload relevant **text-based digital** PDF files. They will be processed and indexed for semantic search for the current session.
 4.  **Start Research:** Click the "Start Research" button.
 5.  **View Results:** The agent will fetch data from selected sources, process PDFs, query the LLM, and display a synthesized answer. A log of actions is also shown.
@@ -109,12 +123,16 @@ Once logged in:
 ## Project Structure
 -   `app.py`: Main Streamlit application file.
 -   `utils/`: Directory for helper modules.
-    -   `research_agent.py`: Core orchestration logic for the research process.
+    -   `research_agent.py`: Core orchestration logic for the research process with multi-stage LLM processing.
     -   `llm_handler.py`: Handles communication with Azure OpenAI.
     -   `pubmed_fetcher.py`: Interacts with the PubMed API.
     -   `duckduckgo_searcher.py`: Interface for DuckDuckGo search.
-    -   `document_indexer.py`: Handles PDF text extraction (from text-based PDFs) and chunking.
+    -   `arxiv_fetcher.py`: Fetches academic papers from arXiv.org.
+    -   `news_fetcher.py`: Retrieves news articles from various sources.
+    -   `wikipedia_fetcher.py`: Fetches Wikipedia articles and summaries.
+    -   `semantic_scholar_fetcher.py`: Retrieves academic papers with detailed metadata.
     -   `vector_store_handler.py`: Manages the FAISS vector store and similarity searches.
+    -   `docx_exporter.py`: Handles Word document export functionality.
 -   `requirements.txt`: Python dependencies.
 -   `README.md`: This file.
 -   `AGENTS.md`: Specific instructions for AI development agents working on this codebase.

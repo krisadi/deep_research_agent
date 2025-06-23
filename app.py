@@ -1,9 +1,10 @@
 import streamlit as st
 from dotenv import load_dotenv # For loading .env file
 from utils import research_agent # research_agent will import its dependencies
-from utils.research_agent import SOURCE_PUBMED, SOURCE_DUCKDUGO # Import constants
+from utils.pubmed_fetcher import SOURCE_NAME as PUBMED_SOURCE_NAME
+from utils.duckduckgo_searcher import SOURCE_NAME as DUCKDUCKGO_SOURCE_NAME
 from utils.docx_exporter import create_research_report_docx, save_docx_to_bytes, generate_docx_filename
-from typing import Set
+from typing import Set, List, Dict, Any
 import os # For environment variable checks
 
 # Load environment variables from .env file at the very beginning
@@ -711,8 +712,10 @@ def display_main_app():
             <h4 style="margin: 0 0 1rem 0; color: #2c3e50;">📊 Data Sources</h4>
         """, unsafe_allow_html=True)
     
-        available_sources = [SOURCE_PUBMED, SOURCE_DUCKDUGO]
-        default_sources = [SOURCE_PUBMED, SOURCE_DUCKDUGO] 
+        # Get available sources dynamically from the research agent
+        available_sources = research_agent.get_available_sources()
+        # Default to all available sources
+        default_sources = available_sources
 
         selected_sources: Set[str] = set(st.multiselect(
             "Select information sources:",
@@ -722,7 +725,7 @@ def display_main_app():
         ))
 
         # PubMed options with increased limit
-        if SOURCE_PUBMED in selected_sources:
+        if PUBMED_SOURCE_NAME in selected_sources:
             st.markdown("#### 🔬 PubMed Settings")
             max_pubmed_articles = st.slider("Max articles:", 
                                             min_value=1, max_value=100, value=10,
@@ -844,7 +847,7 @@ def display_main_app():
                 research_result = research_agent.conduct_research(
                         query=query,
                         selected_data_sources=selected_sources,
-                        max_pubmed_articles=max_pubmed_articles if SOURCE_PUBMED in selected_sources else 0,
+                        max_pubmed_articles=max_pubmed_articles if PUBMED_SOURCE_NAME in selected_sources else 0,
                         on_progress_update=streamlit_progress_update,
                     )
                 
@@ -854,9 +857,8 @@ def display_main_app():
                     st.session_state.source_data = research_result['source_data']
                     st.session_state.is_raw_data = research_result['is_raw_data']
                     # Initialize filtered sources to include all sources
-                    st.session_state.filtered_sources = set(range(len(st.session_state.source_data.get('pdf_sources', []) + 
-                                                                       st.session_state.source_data.get('pubmed_sources', []) + 
-                                                                       st.session_state.source_data.get('web_sources', []))))
+                    total_sources = sum(len(v) for v in st.session_state.source_data.values())
+                    st.session_state.filtered_sources = set(range(total_sources))
                 else:
                     # Handle legacy string return format
                     st.session_state.results = research_result
@@ -927,96 +929,66 @@ def display_main_app():
             with main_col:
                 st.markdown("### 📋 Available Sources")
                 
-                # Add PDF type filter if PDF sources exist
-                pdf_sources = st.session_state.source_data.get('pdf_sources', [])
-                if pdf_sources:
-                    # Get unique PDF types
-                    pdf_types = list(set([source.get('pdf_type', 'Unknown') for source in pdf_sources]))
-                    pdf_types.sort()
-                    
-                    st.markdown("""
-                    <div class="pdf-type-filter">
-                        <h4>🏷️ Filter by PDF Type</h4>
-                    """, unsafe_allow_html=True)
-                    
-                    selected_pdf_types = st.multiselect(
-                        "Select PDF types to include:",
-                        options=pdf_types,
-                        default=pdf_types,  # Include all by default
-                        help="Filter sources by PDF type. Only selected types will be shown."
-                    )
-                    
-                    st.markdown("</div>", unsafe_allow_html=True)
-                
                 # Display sources with checkboxes for filtering
-                all_sources = []
-                source_types = []
-                source_indices = []  # Track original indices for each source type
-                
-                # Collect all sources with proper indexing
-                pdf_start = 0
-                pubmed_start = len(st.session_state.source_data.get('pdf_sources', []))
-                web_start = pubmed_start + len(st.session_state.source_data.get('pubmed_sources', []))
-                
-                # PDF sources (with type filtering)
-                for i, source in enumerate(st.session_state.source_data.get('pdf_sources', [])):
-                    pdf_type = source.get('pdf_type', 'Unknown')
-                    # Only include if type is selected or if no PDF sources exist (show all)
-                    if not pdf_sources or pdf_type in selected_pdf_types:
-                        all_sources.append(f"📄 {source.get('title', 'PDF Document')}")
-                        source_types.append('pdf')
-                        source_indices.append(i)
-                
-                # PubMed sources
-                for i, source in enumerate(st.session_state.source_data.get('pubmed_sources', [])):
-                    all_sources.append(f"🔬 {source.get('title', 'PubMed Article')}")
-                    source_types.append('pubmed')
-                    source_indices.append(i)
-                
-                # Web sources
-                for i, source in enumerate(st.session_state.source_data.get('web_sources', [])):
-                    all_sources.append(f"🌐 {source.get('title', 'Web Search Result')}")
-                    source_types.append('web')
-                    source_indices.append(i)
-                
+                # Create a flattened list of all sources with their original keys and indices
+                flat_sources_with_info = []
+                for source_key, sources in st.session_state.source_data.items():
+                    for i, source_item in enumerate(sources):
+                        flat_sources_with_info.append({
+                            "key": source_key,
+                            "index": i,
+                            "item": source_item
+                        })
+
                 # Create checkboxes for each source
-                selected_sources_for_regeneration = []
+                selected_indices = []
                 
                 # Add "Select All" checkbox
-                select_all = st.checkbox("✅ Select All Sources", value=len(st.session_state.filtered_sources) == len(all_sources), key="select_all")
+                select_all_default = len(st.session_state.filtered_sources) == len(flat_sources_with_info)
+                select_all = st.checkbox("✅ Select All Sources", value=select_all_default, key="select_all")
                 
-                # Handle select all logic
+                # Update filtered sources based on select all state
                 if select_all:
-                    # If select all is checked, select all sources
-                    selected_sources_for_regeneration = list(range(len(all_sources)))
-                else:
-                    # If select all is unchecked, clear all selections
-                    selected_sources_for_regeneration = []
+                    st.session_state.filtered_sources = set(range(len(flat_sources_with_info)))
+                elif len(st.session_state.filtered_sources) == len(flat_sources_with_info):
+                    # If select all was unchecked, clear all selections
+                    st.session_state.filtered_sources = set()
+
+                # Show individual checkboxes
+                for i, source_info in enumerate(flat_sources_with_info):
+                    source_item = source_info["item"]
+                    source_key = source_info["key"]
+                    # Format the source key into a user-friendly name
+                    source_type_name = source_key.replace('_sources', '').replace('_', ' ').strip().title()
                     
-                    # Show individual checkboxes for selective choosing
-                    for i, (source, source_type) in enumerate(zip(all_sources, source_types)):
-                        col_check, col_link = st.columns([0.8, 0.2])
-                        
-                        with col_check:
-                            checkbox_value = st.checkbox(
-                                source, 
-                                value=False,  # Always start unchecked when select all is off
-                                key=f"source_{i}"
-                            )
-                            if checkbox_value:
-                                selected_sources_for_regeneration.append(i)
-                        
-                        with col_link:
-                            if st.button("🔍", key=f"view_{i}", help="Preview excerpt"):
-                                st.session_state.selected_source_index = i
-                                st.session_state.selected_source_type = source_type
-                                st.session_state.selected_source_data_index = source_indices[i]
-                
-                # Update filtered sources
-                st.session_state.filtered_sources = set(selected_sources_for_regeneration)
+                    is_selected = i in st.session_state.filtered_sources
+                    
+                    col_check, col_link = st.columns([0.8, 0.2])
+                    
+                    with col_check:
+                        checkbox_value = st.checkbox(
+                            f"📄 [{source_type_name}] {source_item.get('title', 'Source')}", 
+                            value=is_selected,
+                            key=f"source_{i}"
+                        )
+                        if checkbox_value:
+                            selected_indices.append(i)
+                        else:
+                            # Remove from filtered sources if unchecked
+                            if i in st.session_state.filtered_sources:
+                                st.session_state.filtered_sources.remove(i)
+                    
+                    with col_link:
+                        if st.button("🔍", key=f"view_{i}", help="Preview excerpt"):
+                            st.session_state.selected_source_key = source_info["key"]
+                            st.session_state.selected_source_data_index = source_info["index"]
+                            st.rerun()
+
+                # Update filtered sources with current selections
+                st.session_state.filtered_sources = set(selected_indices)
                 
                 # Selection info
-                total_sources = len(all_sources)
+                total_sources = len(flat_sources_with_info)
                 selected_count = len(st.session_state.filtered_sources)
                 st.info(f"**Selected:** {selected_count}/{total_sources} sources")
                 
@@ -1029,177 +1001,32 @@ def display_main_app():
                         def regeneration_progress_update(message: str):
                             st.session_state.progress_messages.append(message)
                         
-                        # Add initial progress message
                         regeneration_progress_update("🔄 Starting regeneration process...")
                         
                         # Filter the source data based on selection
                         regeneration_progress_update("📊 Filtering selected sources...")
-                        filtered_data = {
-                            'pdf_sources': [],
-                            'pubmed_sources': [],
-                            'web_sources': []
-                        }
+                        filtered_data: Dict[str, List[Dict[str, Any]]] = {}
+                        for i in st.session_state.filtered_sources:
+                            source_info = flat_sources_with_info[i]
+                            key = source_info["key"]
+                            item = source_info["item"]
+                            if key not in filtered_data:
+                                filtered_data[key] = []
+                            filtered_data[key].append(item)
                         
-                        for i in st.session_state.filtered_sources: # Iterate through the indices of selected sources
-                            source_type = source_types[i] # Get the type of the selected source
-                            original_index = source_indices[i] # Get the original index within its type list
-
-                            if source_type == 'pdf':
-                                source_object = st.session_state.source_data['pdf_sources'][original_index]
-                                filtered_data['pdf_sources'].append(source_object)
-                            elif source_type == 'pubmed':
-                                source_object = st.session_state.source_data['pubmed_sources'][original_index]
-                                filtered_data['pubmed_sources'].append(source_object)
-                            elif source_type == 'web':
-                                source_object = st.session_state.source_data['web_sources'][original_index]
-                                filtered_data['web_sources'].append(source_object)
-
-                        regeneration_progress_update(f"✅ Filtered {len(filtered_data['pdf_sources'])} PDF, {len(filtered_data['pubmed_sources'])} PubMed, and {len(filtered_data['web_sources'])} web sources")
+                        show_loading_spinner("🧠 AI is thinking... Generating insights from selected sources")
                         
-                        # Execute regeneration with custom loading spinner
                         try:
-                            # Import required modules for regeneration
-                            from utils.llm_handler import get_llm_response
-                            
-                            # Create a simplified research function for regeneration
-                            def regenerate_insights(filtered_data, query, progress_callback):
-                                # Combine all filtered sources
-                                progress_callback("📝 Combining source content...")
-                                all_texts = []
-                                sources_summary = []
-                                
-                                for source in filtered_data['pdf_sources']:
-                                    all_texts.append(source.get('content', ''))
-                                    sources_summary.append(source.get('title', 'PDF Document'))
-                                
-                                for source in filtered_data['pubmed_sources']:
-                                    all_texts.append(source.get('content', ''))
-                                    sources_summary.append(source.get('title', 'PubMed Article'))
-                                
-                                for source in filtered_data['web_sources']:
-                                    all_texts.append(source.get('content', ''))
-                                    sources_summary.append(source.get('title', 'Web Search Result'))
-                                
-                                progress_callback(f"📚 Combined content from {len(sources_summary)} sources")
-                                
-                                if not all_texts:
-                                    progress_callback("⚠️ No sources selected for regeneration")
-                                    return {
-                                        'report': "No sources selected for regeneration.",
-                                        'is_raw_data': True
-                                    }
-                                
-                                # Check LLM availability
-                                progress_callback("🔍 Checking LLM availability...")
-                                llm_test_response = get_llm_response("Test", "You are a helpful assistant.")
-                                llm_available = not (llm_test_response.startswith("Error:") or "Azure OpenAI" in llm_test_response or "Language Model" in llm_test_response)
-                                
-                                if not llm_available:
-                                    progress_callback("⚠️ LLM not available, generating raw data report")
-                                    # Return simplified format without raw data section
-                                    final_report = f"""
-<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-<h1 style="color: #2c3e50; border-bottom: 3px solid #667eea; padding-bottom: 10px;">Filtered Research Report: "{query}"</h1>
-
-<div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 15px; margin: 20px 0;">
-<strong>ℹ️ Note:</strong> LLM processing is not available. Use the Source Management section below to view individual source excerpts and regenerate insights from selected sources.
-</div>
-
-<h2 style="color: #34495e; margin-top: 30px;">📚 Selected Sources ({len(sources_summary)})</h2>
-<div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 15px 0;">
-"""
-                                    for src in sources_summary:
-                                        final_report += f"<div style='margin: 8px 0;'>• {src}</div>"
-                                    final_report += "</div>"
-                                    
-                                    final_report += f"""
-<hr style="margin: 30px 0; border: none; border-top: 2px solid #e1e8ed;">
-<div style="background: #e8f5e8; border: 1px solid #c8e6c9; border-radius: 8px; padding: 15px; margin: 20px 0;">
-    <strong>📊 Summary:</strong> {len(sources_summary)} sources were processed. Use the Source Management section below to view individual excerpts and regenerate insights from selected sources.
-</div>
-</div>
-"""
-                                    return {
-                                        'report': final_report,
-                                        'is_raw_data': True
-                                    }
-                                
-                                # LLM is available - synthesize
-                                progress_callback("🧠 LLM available, synthesizing insights...")
-                                combined_text = "\n\n".join(all_texts)
-                                
-                                if len(combined_text) > 50000:  # Limit context
-                                    progress_callback("📏 Truncating content to fit context limits...")
-                                    combined_text = combined_text[:50000]
-                                
-                                progress_callback("🤖 Generating AI-synthesized response...")
-                                llm_prompt = f"""
-You are a highly proficient AI research assistant. Your task is to synthesize information from the provided documents to answer the user's research query.
-
-User's Research Query: "{query}"
-
-Provided Documents (filtered selection):
-{combined_text}
-
-Instructions:
-1. Carefully read all provided document excerpts.
-2. Based *only* on the information within these documents, provide a comprehensive answer to the user's research query.
-3. Structure your answer clearly. Use bullet points or numbered lists for key findings if appropriate.
-4. If the documents contain conflicting information, acknowledge it if relevant to the query.
-5. If the documents do not contain sufficient information to answer the query thoroughly, explicitly state that and indicate what information might be missing.
-6. When possible, reference the source of key pieces of information.
-7. Your response should be objective and analytical.
-
-Begin your synthesized answer below:
-"""
-                                
-                                llm_response = get_llm_response(llm_prompt)
-                                
-                                if "Error:" in llm_response and ("Azure OpenAI" in llm_response or "Language Model" in llm_response):
-                                    progress_callback("❌ Failed to get LLM response")
-                                    return {
-                                        'report': f"Failed to get a response from the Language Model. Details: {llm_response}",
-                                        'is_raw_data': True
-                                    }
-                                
-                                progress_callback("✅ Successfully generated AI-synthesized response")
-                                final_report = f"""
-<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-<h1 style="color: #2c3e50; border-bottom: 3px solid #667eea; padding-bottom: 10px;">Filtered AI Research Report: "{query}"</h1>
-
-<div style="background: #e8f5e8; border: 1px solid #c8e6c9; border-radius: 8px; padding: 15px; margin: 20px 0;">
-<strong>🤖 AI Synthesis:</strong> This report has been synthesized from {len(sources_summary)} selected sources.
-</div>
-
-<h2 style="color: #34495e; margin-top: 30px;">📚 Selected Sources</h2>
-<div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 15px 0;">
-"""
-                                for src in sources_summary:
-                                    final_report += f"<div style='margin: 8px 0;'>• {src}</div>"
-                                final_report += "</div>"
-                                
-                                final_report += """
-<hr style="margin: 30px 0; border: none; border-top: 2px solid #e1e8ed;">
-<h2 style="color: #2c3e50; margin-top: 30px;">💡 AI-Synthesized Answer</h2>
-<div style="background: white; border: 1px solid #e1e8ed; border-radius: 8px; padding: 25px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.6; font-size: 1.1em;">
-"""
-                                final_report += llm_response
-                                final_report += """
-</div>
-</div>
-"""
-                                
-                                return {
-                                    'report': final_report,
-                                    'is_raw_data': False
-                                }
-                            
-                            show_loading_spinner("🧠 AI is thinking... Generating insights from selected sources")
-                            regeneration_result = regenerate_insights(filtered_data, query, regeneration_progress_update)
+                            # Call the new, centralized regeneration function
+                            regeneration_result = research_agent.regenerate_report_from_sources(
+                                query=st.session_state.current_query,
+                                source_data=filtered_data,
+                                on_progress_update=regeneration_progress_update
+                            )
                             st.session_state.results = regeneration_result['report']
                             st.session_state.is_raw_data = regeneration_result['is_raw_data']
                             regeneration_progress_update("🎉 Regeneration completed successfully!")
-                            
+
                         except Exception as e:
                             regeneration_progress_update(f"❌ Error during regeneration: {str(e)}")
                             st.error(f"Error during regeneration: {str(e)}")
@@ -1209,11 +1036,11 @@ Begin your synthesized answer below:
             
             with sidebar_col:
                 # Professional pop-up style excerpt panel
-                if hasattr(st.session_state, 'selected_source_index') and st.session_state.selected_source_index is not None:
-                    source_type = st.session_state.selected_source_type
+                if 'selected_source_key' in st.session_state and st.session_state.selected_source_key is not None:
+                    source_key = st.session_state.selected_source_key
                     data_index = st.session_state.selected_source_data_index
+                    source_data_item = st.session_state.source_data[source_key][data_index]
                     
-                    # Professional pop-up styling with better colors
                     st.markdown("""
                     <div style="
                         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1227,185 +1054,24 @@ Begin your synthesized answer below:
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    if source_type == 'pdf':
-                        source_data = st.session_state.source_data['pdf_sources'][data_index]
-                        st.markdown("""
-                        <div style="
-                            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-                            border-radius: 8px;
-                            padding: 15px;
-                            margin-bottom: 15px;
-                            color: white;
-                            font-weight: 600;
-                        ">
-                            📄 PDF Document
-                        </div>
-                        """, unsafe_allow_html=True)
-                    elif source_type == 'pubmed':
-                        source_data = st.session_state.source_data['pubmed_sources'][data_index]
-                        st.markdown("""
-                        <div style="
-                            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-                            border-radius: 8px;
-                            padding: 15px;
-                            margin-bottom: 15px;
-                            color: white;
-                            font-weight: 600;
-                        ">
-                            🔬 PubMed Article
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:  # web
-                        source_data = st.session_state.source_data['web_sources'][data_index]
-                        st.markdown("""
-                        <div style="
-                            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-                            border-radius: 8px;
-                            padding: 15px;
-                            margin-bottom: 15px;
-                            color: #2c3e50;
-                            font-weight: 600;
-                        ">
-                            🌐 Web Search Result
-                        </div>
-                        """, unsafe_allow_html=True)
+                    st.markdown(f"#### {source_data_item.get('title', 'Source')}")
                     
-                    # Display source title with professional styling
-                    st.markdown(f"""
-                    <div style="
-                        background: #ffffff;
-                        border-left: 4px solid #667eea;
-                        padding: 12px;
-                        margin-bottom: 15px;
-                        border-radius: 4px;
-                        border: 1px solid #e1e8ed;
-                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                    ">
-                        <strong style="color: #1f2937; font-size: 1.1em;">{source_data.get('title', 'Source')}</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    content = source_data_item.get('content', '')
+                    st.text_area("📋 Copyable Content", value=content, height=300, key="sidebar_content")
                     
-                    # Display content with professional styling
-                    content = source_data.get('content', '')
+                    url = source_data_item.get('url', '')
+                    if url:
+                        st.markdown(f"**URL:** [{url}]({url})")
                     
-                    st.text_area(
-                        "📋 Copyable Content",
-                        value=content,
-                        height=300,
-                        key="sidebar_content",
-                        help="You can copy the content from this text area"
-                    )
-                    
-                    # Display metadata with professional styling
-                    if source_type == 'pubmed':
-                        pmid = source_data.get('pmid', '')
-                        url = source_data.get('url', '')
-                        if pmid:
-                            st.markdown(f"""
-                            <div style="
-                                background: #e3f2fd;
-                                border: 1px solid #bbdefb;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                            ">
-                                <strong style="color: #1976d2;">PMID:</strong> {pmid}
-                            </div>
-                            """, unsafe_allow_html=True)
-                        if url:
-                            st.markdown(f"""
-                            <div style="
-                                background: #e8f5e8;
-                                border: 1px solid #c8e6c9;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                                word-wrap: break-word;
-                                overflow-wrap: break-word;
-                                max-width: 100%;
-                            ">
-                                <strong style="color: #388e3c;">URL:</strong> <a href="{url}" target="_blank" style="color: #1976d2; text-decoration: none; word-break: break-all; display: inline-block; max-width: 100%;">{url}</a>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    elif source_type == 'web':
-                        url = source_data.get('url', '')
-                        if url:
-                            st.markdown(f"""
-                            <div style="
-                                background: #e8f5e8;
-                                border: 1px solid #c8e6c9;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                                word-wrap: break-word;
-                                overflow-wrap: break-word;
-                                max-width: 100%;
-                            ">
-                                <strong style="color: #388e3c;">URL:</strong> <a href="{url}" target="_blank" style="color: #1976d2; text-decoration: none; word-break: break-all; display: inline-block; max-width: 100%;">{url}</a>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    elif source_type == 'pdf':
-                        source_file = source_data.get('source', '')
-                        chunk_num = source_data.get('chunk_number', '')
-                        page_num = source_data.get('page_number', '')
-                        pdf_type = source_data.get('pdf_type', '')
-                        if source_file:
-                            st.markdown(f"""
-                            <div style="
-                                background: #fff3e0;
-                                border: 1px solid #ffcc02;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                            ">
-                                <strong style="color: #f57c00;">File:</strong> {source_file}
-                            </div>
-                            """, unsafe_allow_html=True)
-                        if pdf_type:
-                            st.markdown(f"""
-                            <div style="
-                                background: #e1f5fe;
-                                border: 1px solid #81d4fa;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                            ">
-                                <strong style="color: #0277bd;">Type:</strong> {pdf_type}
-                            </div>
-                            """, unsafe_allow_html=True)
-                        if page_num:
-                            st.markdown(f"""
-                            <div style="
-                                background: #e8f5e8;
-                                border: 1px solid #c8e6c9;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                            ">
-                                <strong style="color: #388e3c;">Page:</strong> {page_num}
-                            </div>
-                            """, unsafe_allow_html=True)
-                        if chunk_num:
-                            st.markdown(f"""
-                            <div style="
-                                background: #f3e5f5;
-                                border: 1px solid #ce93d8;
-                                border-radius: 6px;
-                                padding: 10px;
-                                margin-bottom: 10px;
-                            ">
-                                <strong style="color: #7b1fa2;">Chunk:</strong> {chunk_num}
-                            </div>
-                            """, unsafe_allow_html=True)
-                    
-                    # Close button with professional styling
+                    metadata = source_data_item.get('metadata', {})
+                    if metadata:
+                        st.json(metadata)
+
                     if st.button("❌ Close Excerpt", key="close_excerpt", use_container_width=True):
-                        st.session_state.selected_source_index = None
-                        st.session_state.selected_source_type = None
+                        st.session_state.selected_source_key = None
                         st.session_state.selected_source_data_index = None
                         st.rerun()
                 else:
-                    # Empty state with professional styling
                     st.markdown("""
                     <div style="
                         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1418,45 +1084,71 @@ Begin your synthesized answer below:
                         <h3 style="color: white; margin: 0; font-size: 1.2em; font-weight: 600;">📖 Source Excerpt</h3>
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    st.markdown("""
-                    <div style="
-                        background: #f8f9fa;
-                        border: 2px dashed #dee2e6;
-                        border-radius: 8px;
-                        padding: 30px;
-                        text-align: center;
-                        color: #6c757d;
-                    ">
-                        <div style="font-size: 2em; margin-bottom: 10px;">👆</div>
-                        <strong>Click the 🔍 button next to any source to view its excerpt here.</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.info("Click the 🔍 button next to any source to view its excerpt here.")
+
         st.markdown("</div>", unsafe_allow_html=True)
 
     # --- Progress Log ---
     if st.session_state.progress_messages:
-        # Progress bar (always visible)
         if st.session_state.processing:
-            progress_bar = st.progress(0)
-            # Calculate progress based on number of messages
-            progress_value = min(len(st.session_state.progress_messages) / 10, 1.0)  # Assume 10 steps for full progress
-            progress_bar.progress(progress_value)
+            st.progress(len(st.session_state.progress_messages) / 10.0)
         
-        # Collapsible progress log
         with st.expander("📝 Research Process Log", expanded=False):
             st.markdown("""
             <div class="progress-log">
             """, unsafe_allow_html=True)
-            
-            for i, msg in enumerate(st.session_state.progress_messages):
-                st.markdown(f"""
-                <div class="progress-item">
-                    <strong>{i+1}.</strong> {msg}
-                </div>
-                """, unsafe_allow_html=True)
-            
+            for msg in st.session_state.progress_messages:
+                st.markdown(f'<div class="progress-item">{msg}</div>', unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
+    
+    # --- Export Section ---
+    if st.session_state.results:
+        st.markdown("---")
+        st.markdown("## 📄 Export Research Report")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            # Use a unique key that changes when results are updated
+            export_key = f"export_docx_{hash(st.session_state.results) % 10000}"
+            if st.button("📄 Export to DOCX", key=export_key, help="Export the report to a DOCX file", use_container_width=True, type="primary"):
+                try:
+                    # Create filtered source data for export based on current selections
+                    filtered_source_data = {}
+                    if st.session_state.filtered_sources:
+                        for i in st.session_state.filtered_sources:
+                            source_info = flat_sources_with_info[i]
+                            key = source_info["key"]
+                            item = source_info["item"]
+                            if key not in filtered_source_data:
+                                filtered_source_data[key] = []
+                            filtered_source_data[key].append(item)
+                    else:
+                        # If no sources selected, use all source data
+                        filtered_source_data = st.session_state.source_data
+                    
+                    # Generate the DOCX document with the latest results and filtered data
+                    doc = create_research_report_docx(
+                        query=st.session_state.get('current_query', 'Research Report'),
+                        results=st.session_state.results,  # This will be the latest results after regeneration
+                        is_raw_data=st.session_state.is_raw_data,
+                        source_data=filtered_source_data  # Use filtered data instead of all data
+                    )
+                    # Save to a byte stream
+                    doc_bytes = save_docx_to_bytes(doc)
+                    # Generate a filename
+                    file_name = generate_docx_filename(st.session_state.get('current_query', 'Research_Report'))
+                    
+                    # Provide for download
+                    st.download_button(
+                        label="📥 Download DOCX",
+                        data=doc_bytes,
+                        file_name=file_name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
+                    st.success("✅ DOCX report is ready for download!")
+                except Exception as e:
+                    st.error(f"❌ Failed to generate DOCX: {e}")
     
     # --- Initial State ---
     elif not st.session_state.results and not st.session_state.processing:
