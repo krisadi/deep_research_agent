@@ -7,10 +7,8 @@ from . import wikipedia_fetcher
 from . import pdf_fetcher_1
 from . import pdf_fetcher_2
 from . import pdf_fetcher_3
-from .vector_store_handler import VectorStoreHandler
 
-from typing import List, Dict, Optional, Callable, Any, Set, Union
-import io
+from typing import List, Dict, Optional, Callable, Any, Set
 import os
 from dotenv import load_dotenv
 

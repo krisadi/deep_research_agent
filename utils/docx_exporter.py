@@ -542,12 +542,45 @@ def add_italic_text(doc, text):
 
 
 def add_regular_text(doc, text):
-    """Add regular text to the document"""
+    """Add regular text to the document with inline markdown formatting"""
     # Clean up any remaining HTML tags
     clean_text = re.sub(r'<[^>]+>', '', text)
+    
     if clean_text.strip():
         para = doc.add_paragraph()
-        para.add_run(clean_text.strip())
+        
+        # Process inline markdown formatting
+        current_pos = 0
+        while current_pos < len(clean_text):
+            # Look for bold text **text**
+            bold_match = re.search(r'\*\*(.*?)\*\*', clean_text[current_pos:])
+            # Look for italic text *text* (but not **text**)
+            italic_match = re.search(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', clean_text[current_pos:])
+            
+            if bold_match and (not italic_match or bold_match.start() < italic_match.start()):
+                # Add text before bold
+                if bold_match.start() > 0:
+                    para.add_run(clean_text[current_pos:current_pos + bold_match.start()])
+                
+                # Add bold text
+                bold_run = para.add_run(bold_match.group(1))
+                bold_run.bold = True
+                
+                current_pos += bold_match.end()
+            elif italic_match:
+                # Add text before italic
+                if italic_match.start() > 0:
+                    para.add_run(clean_text[current_pos:current_pos + italic_match.start()])
+                
+                # Add italic text
+                italic_run = para.add_run(italic_match.group(1))
+                italic_run.italic = True
+                
+                current_pos += italic_match.end()
+            else:
+                # No more formatting, add remaining text
+                para.add_run(clean_text[current_pos:])
+                break
 
 
 def add_hyperlink(paragraph, text, url):
