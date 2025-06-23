@@ -19,6 +19,7 @@ faiss-cpu
 streamlit-extras
 # Word document export
 python-docx
+markdown2docx
 
 # Environment variable management
 python-dotenv
